@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tracker">
+<meta name="theme-color" content="#0b0b12">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- Setup notice (shown when config.js still has placeholder values) -->
+<div id="setup-notice" class="setup-notice" hidden>
+  <div class="card setup-card">
+    <h2>Almost there 👋</h2>
+    <p>Add your Supabase project details to finish setup.</p>
+    <ol>
+      <li>Open <code>js/config.js</code></li>
+      <li>Paste your <b>Project URL</b> and <b>anon key</b> from Supabase → Project Settings → API</li>
+      <li>Refresh this page</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Auth screen (shown when signed out) -->
+<div id="auth-screen" class="auth-screen" hidden>
+  <div class="card auth-card">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="44" height="44">
+      <h1>Tracker</h1>
+    </div>
+    <p class="auth-sub">Reselling &amp; fitness, in one place.</p>
+    <form id="auth-form" autocomplete="on">
+      <label>Email
+        <input id="auth-email" type="email" required autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>Password
+        <input id="auth-password" type="password" required minlength="6" autocomplete="current-password" placeholder="••••••••">
+      </label>
+      <p id="auth-error" class="form-error" hidden></p>
+      <button id="auth-submit" type="submit" class="btn btn-primary btn-block">Log in</button>
+    </form>
+    <p class="auth-toggle">
+      <span id="auth-toggle-text">New here?</span>
+      <button id="auth-toggle-btn" type="button" class="link">Create an account</button>
+    </p>
+  </div>
+</div>
+
+<!-- Main app (shown when signed in) -->
+<div id="app" class="app" hidden>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <strong id="view-title">Reselling</strong>
+      <button id="logout-btn" class="link" title="Log out">Log out</button>
+    </div>
+  </header>
+
+  <main id="view" class="view"><!-- active view renders here --></main>
+
+  <nav class="tabbar">
+    <button class="tab" data-tab="resell" aria-label="Reselling">
+      <span class="tab-ico">📦</span><span>Resell</span>
+    </button>
+    <button class="tab" data-tab="food" aria-label="Food">
+      <span class="tab-ico">🍽️</span><span>Food</span>
+    </button>
+    <button class="tab" data-tab="fitness" aria-label="Fitness">
+      <span class="tab-ico">💪</span><span>Fitness</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Toasts + modal host -->
+<div id="toast-host" class="toast-host"></div>
+<div id="modal-host" class="modal-host" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+<script>
+  // Register the service worker (PWA / offline). Ignored on file:// during dev.
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
