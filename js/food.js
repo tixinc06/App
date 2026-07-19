@@ -4,6 +4,7 @@ import { getUid } from './auth.js';
 import {
   el, num, fmtDate, todayISO, shiftDate, toast, formModal, confirmModal, actionSheet, emptyState
 } from './ui.js';
+import { lineChart, chartCard } from './charts.js';
 
 let selectedDate = todayISO();
 
@@ -15,6 +16,21 @@ async function loadData(date) {
   if (foods.error) throw foods.error;
   if (logs.error) throw logs.error;
   return { foods: foods.data || [], logs: logs.data || [] };
+}
+
+// Sum calories per day for the last `days` days → continuous series (zeros for gaps).
+async function loadCalorieTrend(days) {
+  const start = shiftDate(todayISO(), -(days - 1));
+  const { data, error } = await sb.from('food_logs').select('log_date,calories').gte('log_date', start);
+  if (error || !data) return [];
+  const map = {};
+  for (const r of data) map[r.log_date] = (map[r.log_date] || 0) + (+r.calories || 0);
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    const d = shiftDate(start, i);
+    out.push({ t: d, v: map[d] || 0 });
+  }
+  return out;
 }
 
 export async function renderFood(root) {
@@ -68,6 +84,13 @@ export async function renderFood(root) {
     root.append(emptyState('🍽️', 'Nothing logged. Tap + to add food.'));
   } else {
     root.append(el('div', { class: 'list' }, logs.map(l => logRow(l, root))));
+  }
+
+  // ── Insights: calorie trend (last 14 days) ──
+  const trend = await loadCalorieTrend(14);
+  if (trend.some(d => d.v > 0)) {
+    root.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Insights')]));
+    root.append(chartCard('Calories · last 14 days', lineChart(trend, { color: 'var(--amber)', fmt: v => num(v) })));
   }
 
   root.append(el('button', { class: 'fab', title: 'Log food', onClick: () => logFoodForm(foods, root) }, '+'));

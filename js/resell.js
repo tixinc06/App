@@ -4,6 +4,7 @@ import { getUid } from './auth.js';
 import {
   el, money, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet, emptyState
 } from './ui.js';
+import { lineChart, barChart, chartCard } from './charts.js';
 
 const BUCKET = 'resell-photos';
 const profitOf = s => (Number(s.sale_price) || 0) - (Number(s.fees) || 0) -
@@ -61,6 +62,33 @@ export async function renderResell(root) {
     root.append(emptyState('📦', 'No items yet. Tap + to add your first one.'));
   } else {
     root.append(el('div', { class: 'list' }, inventory.map(i => itemRow(i, root))));
+  }
+
+  // ── Insights (charts) ──
+  if (sales.length >= 2) {
+    root.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Insights')]));
+
+    // Cumulative profit over time
+    const dated = sales.filter(s => s.sold_date).sort((a, b) => (a.sold_date < b.sold_date ? -1 : 1));
+    if (dated.length >= 2) {
+      let cum = 0;
+      const series = dated.map(s => ({ t: s.sold_date, v: (cum += profitOf(s)) }));
+      root.append(chartCard('Cumulative profit', lineChart(series, {
+        color: 'var(--green)', fmt: money
+      })));
+    }
+
+    // Profit by platform
+    const byPlat = {};
+    for (const s of sales) {
+      const k = s.platform && s.platform.trim() ? s.platform.trim() : 'Other';
+      byPlat[k] = (byPlat[k] || 0) + profitOf(s);
+    }
+    const bars = Object.entries(byPlat)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+    if (bars.length) root.append(chartCard('Profit by platform', barChart(bars, { fmt: money })));
   }
 
   // ── Recent sales ──

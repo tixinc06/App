@@ -2,9 +2,10 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, num, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet,
+  el, num, fmtDate, todayISO, isoOf, toast, formModal, confirmModal, actionSheet,
   emptyState, openModal, closeModal
 } from './ui.js';
+import { lineChart, barChart, chartCard } from './charts.js';
 
 async function loadData() {
   const [workouts, weights] = await Promise.all([
@@ -14,6 +15,26 @@ async function loadData() {
   if (workouts.error) throw workouts.error;
   if (weights.error) throw weights.error;
   return { workouts: workouts.data || [], weights: weights.data || [] };
+}
+
+// Count workouts per week (Monday-based) for the last `weeks` weeks, oldest→newest.
+function weeklyCounts(workouts, weeks) {
+  const d0 = new Date(todayISO() + 'T00:00:00');
+  const dow = (d0.getDay() + 6) % 7; // 0 = Monday
+  const monday = new Date(d0); monday.setDate(d0.getDate() - dow);
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const ws = new Date(monday); ws.setDate(monday.getDate() - i * 7);
+    const startISO = isoOf(ws);
+    buckets.push({ label: fmtDate(startISO), start: startISO, value: 0 });
+  }
+  for (const w of workouts) {
+    if (!w.workout_date) continue;
+    for (let j = buckets.length - 1; j >= 0; j--) {
+      if (w.workout_date >= buckets[j].start) { buckets[j].value++; break; }
+    }
+  }
+  return buckets;
 }
 
 export async function renderFitness(root) {
@@ -58,12 +79,24 @@ export async function renderFitness(root) {
         ]))));
   }
 
+  // ── Bodyweight trend ──
+  if (weights.length >= 2) {
+    const series = [...weights].reverse().map(w => ({ t: w.entry_date, v: +w.weight }));
+    root.append(chartCard('Bodyweight trend', lineChart(series, { color: 'var(--blue)', fmt: v => num(v) })));
+  }
+
   // ── Workouts ──
   root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Workouts')]));
   if (!workouts.length) {
     root.append(emptyState('💪', 'No workouts yet. Tap + to log one.'));
   } else {
     root.append(el('div', { class: 'list' }, workouts.map(w => workoutRow(w, root))));
+
+    const bars = weeklyCounts(workouts, 8);
+    if (bars.some(b => b.value > 0)) {
+      root.append(el('div', { class: 'section-head', style: 'margin-top:20px' }, [el('h2', {}, 'Insights')]));
+      root.append(chartCard('Workouts · per week', barChart(bars, { color: 'var(--upper, var(--primary-soft))', fmt: v => String(v) })));
+    }
   }
 
   root.append(el('button', { class: 'fab', title: 'Log workout', onClick: () => workoutBuilder(root) }, '+'));

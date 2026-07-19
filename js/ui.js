@@ -30,11 +30,15 @@ export const money = n => {
 };
 export const num = n => (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 });
 
-export const todayISO = () => {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 10);
-};
+// Format a Date as a LOCAL YYYY-MM-DD (never via toISOString, which uses UTC and
+// can roll to the wrong day in timezones offset from UTC).
+export function isoOf(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+export const todayISO = () => isoOf(new Date());
 export function fmtDate(iso) {
   if (!iso) return '';
   const d = new Date(iso + 'T00:00:00');
@@ -43,7 +47,7 @@ export function fmtDate(iso) {
 export function shiftDate(iso, days) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return isoOf(d);
 }
 
 // ── Toasts ──────────────────────────────────────────────────────────────────

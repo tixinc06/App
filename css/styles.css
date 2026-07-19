@@ -155,6 +155,16 @@ textarea{resize:vertical; min-height:70px}
   border-radius:20px 20px 0 0; padding:22px 20px calc(22px + var(--safe-b));
   animation:sheetIn .22s ease}
 @keyframes sheetIn{from{transform:translateY(24px); opacity:.6}to{transform:none; opacity:1}}
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+.chart-card{padding:16px; margin-bottom:12px}
+.chart-title{font-weight:700; font-size:14px}
+.chart-sub{color:var(--muted); font-size:12px; margin-top:2px}
+.chart{width:100%; height:auto; display:block; margin-top:10px; overflow:visible}
+.chart text{font-family:var(--font)}
+.chart-axis{font-size:9px; fill:var(--muted-dim)}
+.chart-val{font-size:9px; font-weight:700; fill:var(--muted)}
+.chart-empty{color:var(--muted-dim); font-size:13px; text-align:center; padding:24px 0}
+
 .modal h3{font-size:19px; font-weight:800; margin-bottom:18px}
 .modal-actions{display:flex; gap:10px; margin-top:6px}
 .modal-actions .btn{flex:1}
