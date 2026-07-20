@@ -10,12 +10,12 @@ import {
 import { lineChart, barChart, chartCard } from './charts.js';
 import { renderTrain } from './workouts.js';
 import { renderProgress } from './progress.js';
+import { renderRanks } from './ranks.js';
 import { detectAndSavePRs, checkGoals, award } from './progression.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
 
 const COMING_SOON = {
-  ranks: 'Ranks — strength tiers per exercise',
   shop: 'Shop — banners, boosters & themes',
   friends: 'Friends — add, share plans & compare'
 };
@@ -35,6 +35,11 @@ export async function renderFitness(root) {
 
   if (fitSegment === 'progress') {
     await renderProgress(body, root);
+    return;
+  }
+
+  if (fitSegment === 'ranks') {
+    await renderRanks(body, root);
     return;
   }
 

@@ -237,6 +237,21 @@ textarea{resize:vertical; min-height:70px}
 .search-row{margin-bottom:10px}
 .search-row input{margin-top:0}
 
+/* ── Rank badges (Fitness: Bronze -> Godly strength tiers) ────────────────── */
+.rank-badge{display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:800;
+  padding:5px 12px; border-radius:99px; text-transform:uppercase; letter-spacing:.03em}
+.rank-bronze{background:rgba(205,127,50,.18); color:#e0995a}
+.rank-silver{background:rgba(192,192,208,.18); color:#c8c8dc}
+.rank-gold{background:rgba(255,200,60,.18); color:#ffcf47}
+.rank-platinum{background:rgba(140,220,210,.18); color:#8cdcd2}
+.rank-diamond{background:rgba(90,200,255,.18); color:#5ac8ff}
+.rank-champion{background:rgba(155,107,255,.18); color:#b592ff}
+.rank-grand-champion{background:rgba(255,90,220,.18); color:#ff7ae0}
+.rank-godly{background:linear-gradient(90deg,#ffd700,#ff8ae2,#5ac8ff,#ffd700);
+  background-size:300% 100%; color:#0b0b12; animation:godlyShimmer 3s linear infinite}
+@keyframes godlyShimmer{from{background-position:0% 0}to{background-position:300% 0}}
+@media (prefers-reduced-motion: reduce){ .rank-godly{animation:none; background-position:0 0} }
+
 /* ── Returned pill ────────────────────────────────────────────────────────── */
 .pill.returned{background:rgba(255,179,65,.14); color:var(--amber); margin-left:6px; vertical-align:middle}
 
