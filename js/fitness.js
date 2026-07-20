@@ -1,11 +1,52 @@
-// Fitness view: workout logging (exercises + sets) and bodyweight tracking.
+// Fitness view: a gamified hub with sub-tabs. Train hosts the workout planner
+// (templates/splits, from workouts.js) plus workout logging + bodyweight
+// tracking (below). Progress/Ranks/Shop/Friends land in later build phases.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, fmtDate, todayISO, isoOf, toast, formModal, confirmModal, actionSheet,
-  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp
+  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp, segmented
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
+import { renderTrain } from './workouts.js';
+
+let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
+
+const COMING_SOON = {
+  progress: 'Progress — level, XP, PRs & goals',
+  ranks: 'Ranks — strength tiers per exercise',
+  shop: 'Shop — banners, boosters & themes',
+  friends: 'Friends — add, share plans & compare'
+};
+
+export async function renderFitness(root) {
+  root.innerHTML = '';
+  root.append(segmented([
+    { value: 'train', label: 'Train' },
+    { value: 'progress', label: 'Progress' },
+    { value: 'ranks', label: 'Ranks' },
+    { value: 'shop', label: 'Shop' },
+    { value: 'friends', label: 'Friends' }
+  ], fitSegment, v => { fitSegment = v; renderFitness(root); }));
+
+  const body = el('div');
+  root.append(body);
+
+  if (fitSegment !== 'train') {
+    body.append(el('div', { class: 'card', style: 'padding:32px 20px;text-align:center' }, [
+      el('div', { style: 'font-size:34px;margin-bottom:10px' }, '🚧'),
+      el('div', { style: 'font-weight:700;margin-bottom:6px' }, 'Coming soon'),
+      el('div', { class: 'muted' }, COMING_SOON[fitSegment] || '')
+    ]));
+    return;
+  }
+
+  const plannerSection = el('div');
+  const logSection = el('div');
+  body.append(plannerSection, logSection);
+  await renderTrain(plannerSection, root);
+  await renderTrainingLog(logSection, root);
+}
 
 async function loadData() {
   const [workouts, weights] = await Promise.all([
@@ -37,26 +78,29 @@ function weeklyCounts(workouts, weeks) {
   return buckets;
 }
 
-export async function renderFitness(root) {
-  root.innerHTML = '';
-  root.append(skeleton(1, 'block'), skeleton(4, 'item'));
+// Existing workout log + bodyweight tracking, now rendered INTO `container`
+// (a sub-section of the Train tab) rather than the true page `root`. Nested
+// actions still take `root` so a save can trigger a full Fitness-tab refresh.
+async function renderTrainingLog(container, root) {
+  container.innerHTML = '';
+  container.append(skeleton(1, 'block'), skeleton(4, 'item'));
   let data;
   try {
     data = await loadData();
   } catch (ex) {
-    root.innerHTML = '';
-    root.append(emptyState('⚠️', 'Could not load data. ' + (ex.message || '')));
+    container.innerHTML = '';
+    container.append(emptyState('⚠️', 'Could not load data. ' + (ex.message || '')));
     return;
   }
   const { workouts, weights } = data;
-  root.innerHTML = '';
+  container.innerHTML = '';
 
   // ── Bodyweight card ──
   const latest = weights[0];
   const prev = weights[1];
   const delta = latest && prev ? Number(latest.weight) - Number(prev.weight) : null;
   const weightNumEl = el('span', {}, latest ? '' : '—');
-  root.append(el('div', { class: 'card', style: 'padding:18px;margin-bottom:20px' }, [
+  container.append(el('div', { class: 'card', style: 'padding:18px;margin-bottom:20px' }, [
     el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
       el('div', {}, [
         el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Bodyweight'),
@@ -73,7 +117,7 @@ export async function renderFitness(root) {
   if (latest) countUp(weightNumEl, Number(latest.weight), num);
 
   if (weights.length > 1) {
-    root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weight history')]));
+    container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weight history')]));
     const weightList = el('div', { class: 'list', style: 'margin-bottom:22px' },
       weights.slice(0, 8).map(w =>
         el('div', { class: 'card item', onClick: () => weightActions(w, root) }, [
@@ -81,32 +125,32 @@ export async function renderFitness(root) {
           el('div', { class: 'sub' }, fmtDate(w.entry_date))
         ])));
     staggerChildren(weightList);
-    root.append(weightList);
+    container.append(weightList);
   }
 
   // ── Bodyweight trend ──
   if (weights.length >= 2) {
     const series = [...weights].reverse().map(w => ({ t: w.entry_date, v: +w.weight }));
-    root.append(chartCard('Bodyweight trend', lineChart(series, { color: 'var(--blue)', fmt: v => num(v) })));
+    container.append(chartCard('Bodyweight trend', lineChart(series, { color: 'var(--blue)', fmt: v => num(v) })));
   }
 
   // ── Workouts ──
-  root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Workouts')]));
+  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Workouts')]));
   if (!workouts.length) {
-    root.append(emptyState('💪', 'No workouts yet. Tap + to log one.'));
+    container.append(emptyState('💪', 'No workouts yet. Tap + to log one.'));
   } else {
     const workoutList = el('div', { class: 'list' }, workouts.map(w => workoutRow(w, root)));
     staggerChildren(workoutList);
-    root.append(workoutList);
+    container.append(workoutList);
 
     const bars = weeklyCounts(workouts, 8);
     if (bars.some(b => b.value > 0)) {
-      root.append(el('div', { class: 'section-head', style: 'margin-top:20px' }, [el('h2', {}, 'Insights')]));
-      root.append(chartCard('Workouts · per week', barChart(bars, { color: 'var(--upper, var(--primary-soft))', fmt: v => String(v) })));
+      container.append(el('div', { class: 'section-head', style: 'margin-top:20px' }, [el('h2', {}, 'Insights')]));
+      container.append(chartCard('Workouts · per week', barChart(bars, { color: 'var(--upper, var(--primary-soft))', fmt: v => String(v) })));
     }
   }
 
-  root.append(el('button', { class: 'fab', title: 'Log workout', onClick: () => workoutBuilder(root) }, '+'));
+  container.append(el('button', { class: 'fab', title: 'Log workout', onClick: () => workoutBuilder(root) }, '+'));
 }
 
 function workoutRow(w, root) {
@@ -191,14 +235,17 @@ function weightActions(w, root) {
 }
 
 // ── Workout builder (custom modal with dynamic exercises + sets) ──
-function workoutBuilder(root) {
+// `prefill`, if given, is { name, exercises: [{name, sets}] } from a template —
+// pre-populates the workout name and one exercise row (with that many empty
+// set rows) per template exercise, ready for the user to fill in real weights.
+export function workoutBuilder(root, prefill) {
   const exWrap = el('div');
   const state = []; // [{ nameInput, sets: [{weightInput, repsInput}] , node }]
 
-  function addExercise() {
+  function addExercise(initialName = '', initialSets = 1) {
     const setsWrap = el('div', { style: 'margin:8px 0 0' });
     const sets = [];
-    const nameInput = el('input', { placeholder: 'Exercise name', style: 'margin-top:0' });
+    const nameInput = el('input', { placeholder: 'Exercise name', value: initialName, style: 'margin-top:0' });
 
     function addSet(weight = '', reps = '') {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', value: weight, style: 'margin-top:0' });
@@ -214,7 +261,7 @@ function workoutBuilder(root) {
       sets.push(rowObj);
       setsWrap.append(row);
     }
-    addSet();
+    for (let i = 0; i < Math.max(1, initialSets); i++) addSet();
 
     const exObj = { nameInput, sets };
     const node = el('div', { class: 'card', style: 'padding:14px;margin-bottom:12px' }, [
@@ -231,10 +278,15 @@ function workoutBuilder(root) {
     state.push(exObj);
     exWrap.append(node);
   }
-  addExercise();
+
+  if (prefill?.exercises?.length) {
+    for (const ex of prefill.exercises) addExercise(ex.name, ex.sets);
+  } else {
+    addExercise();
+  }
 
   const dateInput = el('input', { type: 'date', value: todayISO(), style: 'margin-top:0' });
-  const nameInput = el('input', { placeholder: 'e.g. Push day', style: 'margin-top:0' });
+  const nameInput = el('input', { placeholder: 'e.g. Push day', value: prefill?.name || '', style: 'margin-top:0' });
   const notesInput = el('textarea', { placeholder: 'Notes (optional)' });
   const err = el('p', { class: 'form-error', hidden: true });
   const saveBtn = el('button', { class: 'btn btn-primary btn-block' }, 'Save workout');
@@ -269,12 +321,12 @@ function workoutBuilder(root) {
   });
 
   openModal(el('div', {}, [
-    el('h3', {}, 'Log workout'),
+    el('h3', {}, prefill?.name ? 'Start: ' + prefill.name : 'Log workout'),
     el('label', {}, ['Date', dateInput]),
     el('label', {}, ['Workout name', nameInput]),
     el('div', { class: 'section-head', style: 'margin:6px 2px 10px' }, [el('h2', {}, 'Exercises')]),
     exWrap,
-    el('button', { type: 'button', class: 'btn btn-ghost btn-block', style: 'margin-bottom:14px', onClick: addExercise }, '＋ Add exercise'),
+    el('button', { type: 'button', class: 'btn btn-ghost btn-block', style: 'margin-bottom:14px', onClick: () => addExercise() }, '＋ Add exercise'),
     el('label', {}, ['Notes', notesInput]),
     err,
     saveBtn

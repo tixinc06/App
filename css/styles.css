@@ -173,9 +173,9 @@ textarea{resize:vertical; min-height:70px}
 .segment-indicator{position:absolute; top:4px; bottom:4px; left:0; z-index:0; border-radius:9px;
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
   transition:transform .3s cubic-bezier(.22,1,.36,1), width .3s cubic-bezier(.22,1,.36,1)}
-.segment{position:relative; z-index:1; flex:1; border:none; background:none; color:var(--muted);
-  font-weight:700; font-size:13px; padding:8px 6px; border-radius:9px; transition:color .15s, transform .1s ease;
-  overflow:hidden}
+.segment{position:relative; z-index:1; flex:1; min-width:0; border:none; background:none; color:var(--muted);
+  font-weight:700; font-size:12px; padding:8px 4px; border-radius:9px; transition:color .15s, transform .1s ease;
+  overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
 .segment:active{transform:scale(.94)}
 .segment.active{color:#fff}
 

@@ -121,6 +121,35 @@ CREATE POLICY "own weight_entries" ON weight_entries
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS idx_weight_user_date ON weight_entries (user_id, entry_date DESC);
 
+-- ── Fitness: reusable workout templates ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS workout_templates (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  exercises  JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{name, sets, reps}] — targets, not logged performance
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE workout_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own workout_templates" ON workout_templates
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_workout_templates_user ON workout_templates (user_id, created_at DESC);
+
+-- ── Fitness: splits (schedule templates across the week) ────────────────────
+CREATE TABLE IF NOT EXISTS splits (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  schedule   JSONB NOT NULL DEFAULT '{}'::jsonb,  -- {"0":template_id,...} 0=Sun..6=Sat; missing/null = rest
+  is_active  BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE splits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own splits" ON splits
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_splits_user ON splits (user_id, created_at DESC);
+
 -- ── Reselling: expenses (postage, packaging, subscriptions, fees…) ──────────
 CREATE TABLE IF NOT EXISTS resell_expenses (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
