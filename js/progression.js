@@ -66,6 +66,19 @@ export async function award(events) {
   }
   if (xpGain === 0 && platesGain === 0) return null;
 
+  // Apply an active XP booster from the shop, if any (best-effort — a missing
+  // user_settings table/row just means no boost, not a failure).
+  let boosterApplied = null;
+  try {
+    const { data: settings } = await sb.from('user_settings')
+      .select('active_booster').eq('user_id', progress.user_id).maybeSingle();
+    const booster = settings?.active_booster;
+    if (booster && new Date(booster.expires_at) > new Date()) {
+      xpGain = Math.round(xpGain * booster.multiplier);
+      boosterApplied = booster.multiplier;
+    }
+  } catch { /* no booster available */ }
+
   const { data, error } = await sb.from('fitness_progress').update({
     xp: Number(progress.xp) + xpGain,
     plates: Number(progress.plates) + platesGain,
@@ -74,7 +87,7 @@ export async function award(events) {
   if (error) throw error;
 
   const rolled = await rollLevels(data);
-  return { xpGain, platesGain, labels, levelsGained: rolled.levelsGained, progress: rolled.progress };
+  return { xpGain, platesGain, labels, levelsGained: rolled.levelsGained, progress: rolled.progress, boosterApplied };
 }
 
 // Manual prestige — only allowed once the level cap (55) is reached on the

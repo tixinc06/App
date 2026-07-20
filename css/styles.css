@@ -4,7 +4,7 @@
   --card:#171722; --card2:#1e1e2b;
   --border:rgba(255,255,255,.09); --border-soft:rgba(255,255,255,.05);
   --text:#f3f3fa; --muted:#9a9ab4; --muted-dim:#6a6a84;
-  --primary:#6d5efc; --primary-soft:#9b8dff;
+  --primary:#6d5efc; --primary-soft:#9b8dff; --primary-rgb:109,94,252; --accent2-rgb:63,182,240;
   --green:#22d99a; --amber:#ffb341; --red:#ff5470; --blue:#3fb6f0;
   --radius:16px; --radius-sm:11px;
   --shadow:0 16px 40px -18px rgba(0,0,0,.7);
@@ -20,8 +20,8 @@ body{
   font-family:var(--font); color:var(--text); background:var(--bg);
   -webkit-font-smoothing:antialiased; overscroll-behavior-y:none;
   background:
-    radial-gradient(680px 420px at -8% -12%, rgba(109,94,252,.16), transparent 60%),
-    radial-gradient(620px 460px at 108% 6%, rgba(63,182,240,.12), transparent 60%),
+    radial-gradient(680px 420px at -8% -12%, rgba(var(--primary-rgb),.16), transparent 60%),
+    radial-gradient(620px 460px at 108% 6%, rgba(var(--accent2-rgb),.12), transparent 60%),
     var(--bg);
   background-attachment:fixed;
 }
@@ -318,10 +318,10 @@ textarea{resize:vertical; min-height:70px}
 body::before,body::after{content:''; position:fixed; z-index:-1; pointer-events:none; border-radius:50%;
   filter:blur(64px); opacity:.55; will-change:transform}
 body::before{width:60vmax; height:60vmax; top:-20vmax; left:-16vmax;
-  background:radial-gradient(circle, rgba(109,94,252,.38), transparent 65%);
+  background:radial-gradient(circle, rgba(var(--primary-rgb),.38), transparent 65%);
   animation:auroraA 18s ease-in-out infinite alternate}
 body::after{width:55vmax; height:55vmax; bottom:-18vmax; right:-15vmax;
-  background:radial-gradient(circle, rgba(63,182,240,.32), transparent 65%);
+  background:radial-gradient(circle, rgba(var(--accent2-rgb),.32), transparent 65%);
   animation:auroraB 22s ease-in-out infinite alternate}
 @keyframes auroraA{from{transform:translate(0,0) scale(1)}to{transform:translate(6vmax,8vmax) scale(1.18)}}
 @keyframes auroraB{from{transform:translate(0,0) scale(1)}to{transform:translate(-5vmax,-6vmax) scale(1.12)}}

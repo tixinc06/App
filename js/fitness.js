@@ -11,12 +11,12 @@ import { lineChart, barChart, chartCard } from './charts.js';
 import { renderTrain } from './workouts.js';
 import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
+import { renderShop } from './shop.js';
 import { detectAndSavePRs, checkGoals, award } from './progression.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
 
 const COMING_SOON = {
-  shop: 'Shop — banners, boosters & themes',
   friends: 'Friends — add, share plans & compare'
 };
 
@@ -40,6 +40,11 @@ export async function renderFitness(root) {
 
   if (fitSegment === 'ranks') {
     await renderRanks(body, root);
+    return;
+  }
+
+  if (fitSegment === 'shop') {
+    await renderShop(body, root);
     return;
   }
 
@@ -336,6 +341,7 @@ export function workoutBuilder(root, prefill) {
 
       if (gains) {
         const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
+        if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
         if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
         toast(bits.join(' · '), 'ok');
         if (gains.levelsGained > 0) celebrate();

@@ -200,6 +200,33 @@ CREATE POLICY "own fitness_goals" ON fitness_goals
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS idx_goals_user ON fitness_goals (user_id, achieved, created_at DESC);
 
+-- ── Fitness: shop inventory (permanent theme/banner unlocks) ────────────────
+CREATE TABLE IF NOT EXISTS user_inventory (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  item_code   TEXT NOT NULL,
+  item_type   TEXT NOT NULL CHECK (item_type IN ('theme', 'banner')),
+  acquired_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, item_code)
+);
+
+ALTER TABLE user_inventory ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own user_inventory" ON user_inventory
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Fitness: user settings (equipped cosmetics + active XP booster) ─────────
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id         UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  equipped_theme  TEXT NOT NULL DEFAULT 'default',
+  equipped_banner TEXT,
+  active_booster  JSONB,
+  updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own user_settings" ON user_settings
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
 -- ── Reselling: expenses (postage, packaging, subscriptions, fees…) ──────────
 CREATE TABLE IF NOT EXISTS resell_expenses (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,

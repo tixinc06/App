@@ -7,7 +7,7 @@ import {
   skeleton, staggerChildren, countUp, celebrate
 } from './ui.js';
 import { loadProgress, xpToNext, maxLevelForTrack, prestige } from './progression.js';
-import { MAX_PRESTIGE } from './gamedata.js';
+import { MAX_PRESTIGE, SHOP_ITEMS } from './gamedata.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -20,13 +20,25 @@ async function loadExtras() {
   return { prs: prs.data || [], goals: goals.data || [] };
 }
 
+// Best-effort: the equipped banner's gradient, or null if none/unavailable.
+async function loadBannerGradient() {
+  try {
+    const { data } = await sb.from('user_settings').select('equipped_banner').eq('user_id', getUid()).maybeSingle();
+    if (!data?.equipped_banner) return null;
+    return SHOP_ITEMS.banners.find(b => b.code === data.equipped_banner)?.gradient || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function renderProgress(container, root) {
   container.innerHTML = '';
   container.append(skeleton(1, 'block'), skeleton(4, 'item'));
-  let progress, extras;
+  let progress, extras, bannerGradient;
   try {
     progress = await loadProgress();
     extras = await loadExtras();
+    bannerGradient = await loadBannerGradient();
   } catch (ex) {
     container.innerHTML = '';
     container.append(emptyState('⚠️', 'Could not load progress. ' + (ex.message || '')));
@@ -34,7 +46,7 @@ export async function renderProgress(container, root) {
   }
   container.innerHTML = '';
 
-  container.append(levelCard(progress, container, root));
+  container.append(levelCard(progress, bannerGradient, container, root));
 
   const { prs, goals } = extras;
   const openGoals = goals.filter(g => !g.achieved);
@@ -70,7 +82,7 @@ export async function renderProgress(container, root) {
   }
 }
 
-function levelCard(progress, container, root) {
+function levelCard(progress, bannerGradient, container, root) {
   const need = xpToNext(progress);
   const cap = maxLevelForTrack(progress);
   const atCap = progress.level >= cap;
@@ -83,6 +95,9 @@ function levelCard(progress, container, root) {
   const platesValEl = el('span', {});
 
   const card = el('div', { class: 'card', style: 'padding:18px;margin-bottom:20px' }, [
+    bannerGradient ? el('div', {
+      style: `height:5px;background:${bannerGradient};border-radius:12px 12px 0 0;margin:-18px -18px 14px -18px`
+    }) : null,
     el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
       el('div', {}, [
         el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, prestigeLabel),

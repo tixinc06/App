@@ -6,6 +6,7 @@ import { renderResell } from './resell.js';
 import { renderFood } from './food.js';
 import { renderFitness } from './fitness.js';
 import { renderHome } from './home.js';
+import { loadAndApplyTheme } from './theme.js';
 import { el, toast } from './ui.js';
 
 const sections = {
@@ -135,6 +136,7 @@ async function main() {
       showOnly('app');
       activeSection = null;
       renderActive('forward');
+      loadAndApplyTheme();
     } else {
       showOnly('auth-screen');
     }
