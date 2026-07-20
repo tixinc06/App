@@ -85,7 +85,8 @@ function renderOverview(body, data, root) {
   const { items, sales, expenses } = data;
 
   const totalRealizedProfit = sales.reduce((a, s) => a + profitOf(s), 0);
-  const unsoldCost = items.filter(i => i.status !== 'sold').reduce((a, i) => a + (Number(i.cost) || 0), 0);
+  const unsoldCost = items.filter(i => i.status !== 'sold')
+    .reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
   const totalExpenses = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const netPosition = totalRealizedProfit - unsoldCost - totalExpenses;
 
@@ -183,10 +184,11 @@ function saleDetailRow(s, root) {
   const p = profitOf(s);
   const margin = s.sale_price ? (p / s.sale_price) * 100 : 0;
   const roi = s.cost_snapshot ? (p / s.cost_snapshot) * 100 : 0;
+  const qty = Number(s.quantity) || 1;
   return el('div', { class: 'card item', onClick: () => { closeModal(); saleActions(s, root); } }, [
     el('div', { class: 'thumb' }, '💰'),
     el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, s.item_name || 'Sale'),
+      el('div', { class: 'title' }, (s.item_name || 'Sale') + (qty > 1 ? ` ×${qty}` : '')),
       el('div', { class: 'sub' }, `${money(s.cost_snapshot)} → ${money(s.sale_price)} · margin ${margin.toFixed(0)}% · ROI ${roi.toFixed(0)}%`)
     ]),
     el('div', { class: 'amt ' + (p >= 0 ? 'pos v' : 'neg v') }, money(p))
@@ -197,7 +199,7 @@ function saleDetailRow(s, root) {
 function renderInventory(body, data, root) {
   const { items, sales } = data;
   const inventory = items.filter(i => i.status !== 'sold');
-  const totalValue = inventory.reduce((a, i) => a + (Number(i.cost) || 0), 0);
+  const totalValue = inventory.reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
   const avgAge = inventory.length
     ? Math.round(inventory.reduce((a, i) => a + daysSince(i.purchase_date || i.created_at), 0) / inventory.length)
     : 0;
@@ -233,7 +235,7 @@ function stat(k, v, cls = '') {
 function itemRow(item, root) {
   let thumb;
   if (item.photo_url) {
-    if (/^https?:\/\//i.test(item.photo_url)) {
+    if (/^(https?:\/\/|products\/)/i.test(item.photo_url)) {
       thumb = el('img', { class: 'thumb', src: item.photo_url, alt: '' });
     } else {
       thumb = el('img', { class: 'thumb', alt: '' });
@@ -244,6 +246,7 @@ function itemRow(item, root) {
   }
   const age = daysSince(item.purchase_date || item.created_at);
   const stale = item.status !== 'sold' && age > STALE_DAYS;
+  const qty = Number(item.quantity) || 1;
   const subParts = [
     item.category,
     item.cost != null ? 'Cost ' + money(item.cost) : null,
@@ -254,8 +257,16 @@ function itemRow(item, root) {
   }, [
     thumb,
     el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, [item.name, stale ? el('span', { class: 'badge-stale' }, 'Stale') : null]),
-      el('div', { class: 'sub' }, subParts.join(' · ') || '—')
+      el('div', { class: 'title' }, [
+        item.name,
+        qty > 1 ? el('span', { class: 'dim' }, ` ×${qty}`) : null,
+        stale ? el('span', { class: 'badge-stale' }, 'Stale') : null
+      ]),
+      el('div', { class: 'sub' }, subParts.join(' · ') || '—'),
+      item.product_url ? el('a', {
+        class: 'p-link', href: item.product_url, target: '_blank', rel: 'noopener',
+        onClick: e => e.stopPropagation()
+      }, 'View link ↗') : null
     ]),
     el('span', { class: 'pill ' + item.status }, item.status.replace('_', ' '))
   ]);
@@ -319,8 +330,10 @@ function expenseActions(e, root) {
 const itemFields = (v = {}) => ([
   { name: 'name', label: 'Item name', required: true, value: v.name, placeholder: 'e.g. Nike hoodie' },
   { name: 'category', label: 'Category', value: v.category, placeholder: 'Clothing, shoes…' },
-  { name: 'cost', label: 'Cost (what you paid)', type: 'number', step: '0.01', min: '0', required: true, value: v.cost },
+  { name: 'cost', label: 'Cost per unit (what you paid)', type: 'number', step: '0.01', min: '0', required: true, value: v.cost },
+  { name: 'quantity', label: 'Quantity in stock', type: 'number', step: '1', min: '1', required: true, value: v.quantity ?? 1 },
   { name: 'list_price', label: 'Listing price (optional)', type: 'number', step: '0.01', min: '0', value: v.list_price },
+  { name: 'product_url', label: 'Link (optional)', value: v.product_url, placeholder: 'https://…' },
   { name: 'source', label: 'Source (optional)', value: v.source, placeholder: 'Thrift store, wholesale…' },
   { name: 'purchase_date', label: 'Purchase date', type: 'date', value: v.purchase_date || todayISO() },
   {
@@ -347,11 +360,14 @@ function addItemForm(root) {
   });
 }
 
-// Prefill the add-item form from a saved product (image_url copied as-is; no upload).
+// Prefill the add-item form from a saved product (image_url + link copied as-is; no upload).
 function addItemFromProduct(product, root) {
   formModal({
     title: 'Add: ' + product.name,
-    fields: itemFields({ name: product.name, cost: product.default_cost, category: product.category }),
+    fields: itemFields({
+      name: product.name, cost: product.default_cost, category: product.category,
+      product_url: product.product_url
+    }),
     submitText: 'Add item',
     onSubmit: async v => {
       const payload = { ...v, user_id: getUid() };
@@ -380,10 +396,16 @@ function editItemForm(item, root) {
 }
 
 function markSoldForm(item, root) {
+  const maxQty = Number(item.quantity) || 1;
+  const multi = maxQty > 1;
   formModal({
     title: 'Sold: ' + item.name,
     fields: [
-      { name: 'sale_price', label: 'Sale price', type: 'number', step: '0.01', min: '0', required: true, value: item.list_price },
+      ...(multi ? [{
+        name: 'qty_sold', label: `Quantity sold (of ${maxQty} in stock)`,
+        type: 'number', step: '1', min: '1', max: String(maxQty), required: true, value: maxQty
+      }] : []),
+      { name: 'sale_price', label: 'Sale price' + (multi ? ' (total for units sold)' : ''), type: 'number', step: '0.01', min: '0', required: true, value: item.list_price },
       { name: 'platform', label: 'Platform', placeholder: 'eBay, Depop, Vinted…' },
       { name: 'fees', label: 'Selling fees', type: 'number', step: '0.01', min: '0', value: 0 },
       { name: 'shipping_cost', label: 'Shipping cost you paid', type: 'number', step: '0.01', min: '0', value: 0 },
@@ -391,15 +413,19 @@ function markSoldForm(item, root) {
     ],
     submitText: 'Log sale',
     onSubmit: async v => {
+      const { qty_sold, ...rest } = v;
+      const qtySold = Math.min(maxQty, Math.max(1, Number(qty_sold) || maxQty));
       const sale = {
-        ...v, user_id: getUid(), item_id: item.id,
-        cost_snapshot: item.cost || 0, item_name: item.name
+        ...rest, user_id: getUid(), item_id: item.id,
+        cost_snapshot: (Number(item.cost) || 0) * qtySold, item_name: item.name, quantity: qtySold
       };
       const { error } = await sb.from('resell_sales').insert(sale);
       if (error) throw error;
-      const { error: e2 } = await sb.from('resell_items').update({ status: 'sold' }).eq('id', item.id);
+      const remaining = maxQty - qtySold;
+      const update = remaining > 0 ? { quantity: remaining } : { status: 'sold', quantity: 0 };
+      const { error: e2 } = await sb.from('resell_items').update(update).eq('id', item.id);
       if (e2) throw e2;
-      toast('Sale logged 🎉', 'ok');
+      toast(remaining > 0 ? `Sold ${qtySold} — ${remaining} left in stock 🎉` : 'Sale logged 🎉', 'ok');
       renderResell(root);
     }
   });
@@ -430,7 +456,7 @@ function deleteItem(item, root) {
     message: `"${item.name}" will be removed. Any logged sale for it stays in your history.`,
     confirmText: 'Delete',
     onConfirm: async () => {
-      if (item.photo_url && !/^https?:\/\//i.test(item.photo_url)) {
+      if (item.photo_url && !/^(https?:\/\/|products\/)/i.test(item.photo_url)) {
         await sb.storage.from(BUCKET).remove([item.photo_url]).catch(() => {});
       }
       const { error } = await sb.from('resell_items').delete().eq('id', item.id);

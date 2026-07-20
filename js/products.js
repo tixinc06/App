@@ -4,6 +4,7 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, money, toast, formModal, confirmModal, actionSheet, emptyState, segmented } from './ui.js';
 
+const BUCKET = 'product-images';
 let scope = 'shared'; // 'shared' | 'mine'
 
 async function loadProducts(which) {
@@ -82,7 +83,8 @@ function productActions(p, root, onAddToInventory) {
 
 const productFields = (v = {}) => ([
   { name: 'name', label: 'Product name', required: true, value: v.name, placeholder: 'e.g. Wireless earbuds' },
-  { name: 'image_url', label: 'Image URL (optional)', value: v.image_url, placeholder: 'https://…' },
+  { name: 'photo', label: 'Upload photo (optional)', type: 'file' },
+  { name: 'image_url', label: 'Or image URL (optional)', value: v.image_url, placeholder: 'https://…', help: 'Used only if no photo is uploaded above.' },
   { name: 'product_url', label: 'Source / buy link (optional)', value: v.product_url, placeholder: 'https://…' },
   { name: 'default_cost', label: 'Typical cost', type: 'number', step: '0.01', min: '0', value: v.default_cost },
   { name: 'category', label: 'Category (optional)', value: v.category },
@@ -94,15 +96,29 @@ const productFields = (v = {}) => ([
   }
 ]);
 
+// Uploads to the public product-images bucket and returns a public URL.
+async function uploadProductPhoto(file) {
+  const path = `${getUid()}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const up = await sb.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type });
+  if (up.error) throw up.error;
+  const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 function addProductForm(root, onAddToInventory) {
   formModal({
     title: 'Add product',
     fields: productFields(),
     submitText: 'Save product',
     onSubmit: async v => {
-      const { is_shared, ...rest } = v;
+      const { is_shared, photo, image_url, ...rest } = v;
+      let finalImageUrl = image_url;
+      if (photo) {
+        try { finalImageUrl = await uploadProductPhoto(photo); }
+        catch (ex) { throw new Error('Photo upload failed: ' + (ex.message || 'unknown error')); }
+      }
       const { error } = await sb.from('product_catalog')
-        .insert({ ...rest, is_shared: is_shared === 'yes', user_id: getUid() });
+        .insert({ ...rest, image_url: finalImageUrl, is_shared: is_shared === 'yes', user_id: getUid() });
       if (error) throw error;
       toast('Product saved', 'ok');
       scope = is_shared === 'yes' ? 'shared' : 'mine';
@@ -117,9 +133,14 @@ function editProductForm(p, root, onAddToInventory) {
     fields: productFields(p),
     submitText: 'Save',
     onSubmit: async v => {
-      const { is_shared, ...rest } = v;
+      const { is_shared, photo, image_url, ...rest } = v;
+      let finalImageUrl = image_url;
+      if (photo) {
+        try { finalImageUrl = await uploadProductPhoto(photo); }
+        catch (ex) { throw new Error('Photo upload failed: ' + (ex.message || 'unknown error')); }
+      }
       const { error } = await sb.from('product_catalog')
-        .update({ ...rest, is_shared: is_shared === 'yes' }).eq('id', p.id);
+        .update({ ...rest, image_url: finalImageUrl, is_shared: is_shared === 'yes' }).eq('id', p.id);
       if (error) throw error;
       toast('Saved', 'ok');
       renderProducts(root, onAddToInventory);

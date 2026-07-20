@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS resell_items (
                   CHECK (status IN ('in_stock', 'listed', 'sold')),
   list_price    NUMERIC,
   notes         TEXT DEFAULT '',
+  product_url   TEXT,
+  quantity      INTEGER NOT NULL DEFAULT 1,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -41,6 +43,7 @@ CREATE TABLE IF NOT EXISTS resell_sales (
   cost_snapshot NUMERIC NOT NULL DEFAULT 0,   -- item cost at time of sale
   item_name     TEXT DEFAULT '',              -- name snapshot (survives item deletion)
   sold_date     DATE,
+  quantity      INTEGER NOT NULL DEFAULT 1,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -174,3 +177,19 @@ CREATE POLICY "own photos insert" ON storage.objects FOR INSERT
   WITH CHECK (bucket_id = 'resell-photos' AND owner = auth.uid());
 CREATE POLICY "own photos delete" ON storage.objects FOR DELETE
   USING (bucket_id = 'resell-photos' AND owner = auth.uid());
+
+-- ============================================================================
+-- OPTIONAL: community product photo storage
+-- Public bucket so everyone can see community product images; only the
+-- uploader can write to their own folder within it.
+-- ============================================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "public read product images" ON storage.objects FOR SELECT
+  USING (bucket_id = 'product-images');
+CREATE POLICY "own product image insert" ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'product-images' AND owner = auth.uid());
+CREATE POLICY "own product image delete" ON storage.objects FOR DELETE
+  USING (bucket_id = 'product-images' AND owner = auth.uid());

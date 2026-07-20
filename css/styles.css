@@ -150,11 +150,16 @@ textarea{resize:vertical; min-height:70px}
 /* ── Modal (bottom sheet) ─────────────────────────────────────────────────── */
 .modal-host{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end;
   justify-content:center; background:rgba(0,0,0,.5); backdrop-filter:blur(2px); padding:0}
-.modal{width:100%; max-width:520px; max-height:92dvh; overflow-y:auto;
+.modal{position:relative; width:100%; max-width:520px; max-height:92dvh; overflow-y:auto;
   background:var(--card); border:1px solid var(--border);
   border-radius:20px 20px 0 0; padding:22px 20px calc(22px + var(--safe-b));
   animation:sheetIn .22s ease}
 @keyframes sheetIn{from{transform:translateY(24px); opacity:.6}to{transform:none; opacity:1}}
+.modal-close{position:absolute; top:14px; right:14px; z-index:1;
+  width:30px; height:30px; border-radius:50%; border:1px solid var(--border);
+  background:var(--card2); color:var(--muted); font-size:14px; line-height:1;
+  display:flex; align-items:center; justify-content:center}
+.modal-close:active{transform:scale(.92)}
 /* ── Charts ───────────────────────────────────────────────────────────────── */
 .chart-card{padding:16px; margin-bottom:12px}
 .chart-title{font-weight:700; font-size:14px}

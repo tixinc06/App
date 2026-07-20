@@ -66,7 +66,8 @@ export function closeModal() {
 export function openModal(contentNode) {
   const h = document.getElementById('modal-host');
   h.innerHTML = '';
-  h.append(el('div', { class: 'modal' }, [contentNode]));
+  const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close', onClick: closeModal }, '✕');
+  h.append(el('div', { class: 'modal' }, [closeBtn, contentNode]));
   h.hidden = false;
   h.onclick = e => { if (e.target === h) closeModal(); };
   return closeModal;
@@ -88,7 +89,7 @@ export function formModal({ title, fields, submitText = 'Save', onSubmit }) {
     } else {
       input = el('input', {
         type: f.type || 'text', placeholder: f.placeholder || '',
-        step: f.step, min: f.min, required: f.required, inputmode: f.type === 'number' ? 'decimal' : null
+        step: f.step, min: f.min, max: f.max, required: f.required, inputmode: f.type === 'number' ? 'decimal' : null
       });
     }
     if (f.value != null) input.value = f.value;
