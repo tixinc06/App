@@ -1,7 +1,7 @@
 // Shared UI helpers: DOM building, toasts, modals, and formatting.
 
-// Currency symbol used across the app. Change to '£' or '€' if you prefer.
-export const CUR = '$';
+// Currency symbol used across the app.
+export const CUR = '£';
 
 // Tiny hyperscript-style DOM builder.
 //   el('div', {class:'x', onClick:fn}, ['hi', childNode])
@@ -158,4 +158,18 @@ export function actionSheet(title, actions) {
 // Standard empty-state block.
 export function emptyState(emoji, text) {
   return el('div', { class: 'empty' }, [el('div', { class: 'big' }, emoji), el('div', {}, text)]);
+}
+
+// A segmented control: options = [{value,label}]. Calls onChange(value) when a
+// different segment is tapped. Returns the container node.
+export function segmented(options, active, onChange) {
+  const wrap = el('div', { class: 'segmented' });
+  for (const o of options) {
+    wrap.append(el('button', {
+      type: 'button',
+      class: 'segment' + (o.value === active ? ' active' : ''),
+      onClick: () => { if (o.value !== active) onChange(o.value); }
+    }, o.label));
+  }
+  return wrap;
 }

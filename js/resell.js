@@ -1,23 +1,33 @@
-// Reselling view: inventory, sales, and a profit/ROI dashboard.
+// Reselling view: Overview (net position + monthly P&L calendar), Inventory
+// (in-stock items with aging), and Products (a shared + personal sourcing catalog).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, money, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet, emptyState
+  el, money, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet, emptyState,
+  segmented, openModal, closeModal
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
+import { plCalendar } from './calendar.js';
+import { renderProducts } from './products.js';
 
 const BUCKET = 'resell-photos';
+const STALE_DAYS = 60;
 const profitOf = s => (Number(s.sale_price) || 0) - (Number(s.fees) || 0) -
   (Number(s.shipping_cost) || 0) - (Number(s.cost_snapshot) || 0);
 
+let segment = 'overview'; // 'overview' | 'inventory' | 'products'
+let calYear = null, calMonth = null; // calendar's currently-viewed month
+
 async function loadData() {
-  const [items, sales] = await Promise.all([
+  const [items, sales, expenses] = await Promise.all([
     sb.from('resell_items').select('*').order('created_at', { ascending: false }),
-    sb.from('resell_sales').select('*').order('sold_date', { ascending: false })
+    sb.from('resell_sales').select('*').order('sold_date', { ascending: false }),
+    sb.from('resell_expenses').select('*').order('expense_date', { ascending: false })
   ]);
   if (items.error) throw items.error;
   if (sales.error) throw sales.error;
-  return { items: items.data || [], sales: sales.data || [] };
+  if (expenses.error) throw expenses.error;
+  return { items: items.data || [], sales: sales.data || [], expenses: expenses.data || [] };
 }
 
 // Load a private-bucket thumbnail into an <img> without blocking the list render.
@@ -28,57 +38,109 @@ async function fillThumb(img, path) {
   } catch { /* leave the fallback emoji */ }
 }
 
+function daysSince(dateStr) {
+  if (!dateStr) return 0;
+  const d = new Date(dateStr.slice(0, 10) + 'T00:00:00');
+  const now = new Date(todayISO() + 'T00:00:00');
+  return Math.max(0, Math.round((now - d) / 86400000));
+}
+
 export async function renderResell(root) {
+  if (calYear == null) {
+    const d = new Date();
+    calYear = d.getFullYear(); calMonth = d.getMonth();
+  }
   root.innerHTML = '';
-  root.append(el('p', { class: 'muted' }, 'Loading…'));
+  root.append(segmented([
+    { value: 'overview', label: 'Overview' },
+    { value: 'inventory', label: 'Inventory' },
+    { value: 'products', label: 'Products' }
+  ], segment, v => { segment = v; renderResell(root); }));
+
+  const body = el('div');
+  root.append(body);
+
+  if (segment === 'products') {
+    renderProducts(body, product => addItemFromProduct(product, root));
+    return;
+  }
+
+  body.append(el('p', { class: 'muted' }, 'Loading…'));
   let data;
   try {
     data = await loadData();
   } catch (ex) {
-    root.innerHTML = '';
-    root.append(emptyState('⚠️', 'Could not load data. ' + (ex.message || '')));
+    body.innerHTML = '';
+    body.append(emptyState('⚠️', 'Could not load data. ' + (ex.message || '')));
     return;
   }
-  const { items, sales } = data;
-  root.innerHTML = '';
+  body.innerHTML = '';
 
-  // ── Dashboard stats ──
-  const totalProfit = sales.reduce((a, s) => a + profitOf(s), 0);
+  if (segment === 'overview') renderOverview(body, data, root);
+  else renderInventory(body, data, root);
+}
+
+// ── Overview segment ─────────────────────────────────────────────────────────
+function renderOverview(body, data, root) {
+  const { items, sales, expenses } = data;
+
+  const totalRealizedProfit = sales.reduce((a, s) => a + profitOf(s), 0);
+  const unsoldCost = items.filter(i => i.status !== 'sold').reduce((a, i) => a + (Number(i.cost) || 0), 0);
+  const totalExpenses = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const netPosition = totalRealizedProfit - unsoldCost - totalExpenses;
+
+  const thisMonthPrefix = todayISO().slice(0, 7);
+  const thisMonthProfit = sales
+    .filter(s => s.sold_date && s.sold_date.slice(0, 7) === thisMonthPrefix)
+    .reduce((a, s) => a + profitOf(s), 0);
+
   const investedSold = sales.reduce((a, s) => a + (Number(s.cost_snapshot) || 0), 0);
-  const roi = investedSold > 0 ? (totalProfit / investedSold) * 100 : 0;
-  const inStock = items.filter(i => i.status !== 'sold').length;
+  const roi = investedSold > 0 ? (totalRealizedProfit / investedSold) * 100 : 0;
 
-  root.append(el('div', { class: 'stat-grid' }, [
-    stat('Profit', money(totalProfit), totalProfit > 0 ? 'pos' : totalProfit < 0 ? 'neg' : ''),
-    stat('ROI', (investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—'), roi > 0 ? 'pos' : roi < 0 ? 'neg' : ''),
-    stat('In stock', String(inStock)),
+  body.append(el('div', { class: 'card net-card' }, [
+    el('div', { class: 'k' }, 'Net position'),
+    el('div', { class: 'v ' + (netPosition > 0 ? 'pos' : netPosition < 0 ? 'neg' : '') }, money(netPosition))
+  ]));
+
+  body.append(el('div', { class: 'stat-grid' }, [
+    stat('This month', money(thisMonthProfit), thisMonthProfit > 0 ? 'pos' : thisMonthProfit < 0 ? 'neg' : ''),
+    stat('Inventory value', money(unsoldCost)),
+    stat('ROI', investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—', roi > 0 ? 'pos' : roi < 0 ? 'neg' : ''),
     stat('Sold', String(sales.length))
   ]));
 
-  // ── Inventory (not yet sold) ──
-  const inventory = items.filter(i => i.status !== 'sold');
-  root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Inventory')]));
-  if (!inventory.length) {
-    root.append(emptyState('📦', 'No items yet. Tap + to add your first one.'));
-  } else {
-    root.append(el('div', { class: 'list' }, inventory.map(i => itemRow(i, root))));
+  // Monthly P&L calendar
+  const dayTotals = {};
+  for (const s of sales) {
+    if (!s.sold_date) continue;
+    const t = dayTotals[s.sold_date] || { profit: 0, count: 0 };
+    t.profit += profitOf(s); t.count += 1;
+    dayTotals[s.sold_date] = t;
   }
+  body.append(plCalendar({
+    year: calYear, month: calMonth, dayTotals,
+    onNav: delta => {
+      calMonth += delta;
+      if (calMonth < 0) { calMonth = 11; calYear--; }
+      else if (calMonth > 11) { calMonth = 0; calYear++; }
+      renderResell(root);
+    },
+    onDayClick: iso => showDayModal(iso, sales, root)
+  }));
 
-  // ── Insights (charts) ──
+  body.append(el('button', {
+    class: 'btn btn-block', style: 'margin-bottom:18px', onClick: () => addExpenseForm(root)
+  }, '＋ Add expense'));
+
+  // Insights charts
   if (sales.length >= 2) {
-    root.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Insights')]));
-
-    // Cumulative profit over time
+    body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Insights')]));
     const dated = sales.filter(s => s.sold_date).sort((a, b) => (a.sold_date < b.sold_date ? -1 : 1));
     if (dated.length >= 2) {
       let cum = 0;
       const series = dated.map(s => ({ t: s.sold_date, v: (cum += profitOf(s)) }));
-      root.append(chartCard('Cumulative profit', lineChart(series, {
-        color: 'var(--green)', fmt: money
-      })));
+      body.append(chartCard('Cumulative profit', lineChart(series, { color: 'var(--green)', fmt: money })));
     }
-
-    // Profit by platform
     const byPlat = {};
     for (const s of sales) {
       const k = s.platform && s.platform.trim() ? s.platform.trim() : 'Other';
@@ -88,17 +150,77 @@ export async function renderResell(root) {
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-    if (bars.length) root.append(chartCard('Profit by platform', barChart(bars, { fmt: money })));
+    if (bars.length) body.append(chartCard('Profit by platform', barChart(bars, { fmt: money })));
   }
 
-  // ── Recent sales ──
+  if (expenses.length) {
+    body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Expenses')]));
+    body.append(el('div', { class: 'list' }, expenses.slice(0, 10).map(e => expenseRow(e, root))));
+  }
+
   if (sales.length) {
-    root.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recent sales')]));
-    root.append(el('div', { class: 'list' }, sales.slice(0, 20).map(s => saleRow(s, root))));
+    body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recent sales')]));
+    body.append(el('div', { class: 'list' }, sales.slice(0, 10).map(s => saleRow(s, root))));
   }
 
-  // ── Add button ──
-  root.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
+  body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
+}
+
+function showDayModal(iso, sales, root) {
+  const daySales = sales.filter(s => s.sold_date === iso);
+  const total = daySales.reduce((a, s) => a + profitOf(s), 0);
+  openModal(el('div', {}, [
+    el('h3', {}, fmtDate(iso)),
+    el('p', { class: 'muted', style: 'margin-bottom:14px' },
+      `${daySales.length} sale${daySales.length === 1 ? '' : 's'} · ${money(total)} profit`),
+    el('div', { class: 'list' }, daySales.map(s => saleDetailRow(s, root))),
+    el('button', { class: 'btn btn-ghost btn-block', style: 'margin-top:14px', onClick: closeModal }, 'Close')
+  ]));
+}
+
+// Detailed sale row: Cost → Sold · margin % · ROI %.
+function saleDetailRow(s, root) {
+  const p = profitOf(s);
+  const margin = s.sale_price ? (p / s.sale_price) * 100 : 0;
+  const roi = s.cost_snapshot ? (p / s.cost_snapshot) * 100 : 0;
+  return el('div', { class: 'card item', onClick: () => { closeModal(); saleActions(s, root); } }, [
+    el('div', { class: 'thumb' }, '💰'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, s.item_name || 'Sale'),
+      el('div', { class: 'sub' }, `${money(s.cost_snapshot)} → ${money(s.sale_price)} · margin ${margin.toFixed(0)}% · ROI ${roi.toFixed(0)}%`)
+    ]),
+    el('div', { class: 'amt ' + (p >= 0 ? 'pos v' : 'neg v') }, money(p))
+  ]);
+}
+
+// ── Inventory segment ────────────────────────────────────────────────────────
+function renderInventory(body, data, root) {
+  const { items, sales } = data;
+  const inventory = items.filter(i => i.status !== 'sold');
+  const totalValue = inventory.reduce((a, i) => a + (Number(i.cost) || 0), 0);
+  const avgAge = inventory.length
+    ? Math.round(inventory.reduce((a, i) => a + daysSince(i.purchase_date || i.created_at), 0) / inventory.length)
+    : 0;
+
+  body.append(el('div', { class: 'stat-grid' }, [
+    stat('Inventory value', money(totalValue)),
+    stat('Items', String(inventory.length)),
+    stat('Avg age', inventory.length ? avgAge + 'd' : '—')
+  ]));
+
+  body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'In stock')]));
+  if (!inventory.length) {
+    body.append(emptyState('📦', 'No items yet. Tap + to add your first one.'));
+  } else {
+    body.append(el('div', { class: 'list' }, inventory.map(i => itemRow(i, root))));
+  }
+
+  if (sales.length) {
+    body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recently sold')]));
+    body.append(el('div', { class: 'list' }, sales.slice(0, 15).map(s => saleDetailRow(s, root))));
+  }
+
+  body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
 }
 
 function stat(k, v, cls = '') {
@@ -111,19 +233,29 @@ function stat(k, v, cls = '') {
 function itemRow(item, root) {
   let thumb;
   if (item.photo_url) {
-    thumb = el('img', { class: 'thumb', alt: '' });
-    fillThumb(thumb, item.photo_url);
+    if (/^https?:\/\//i.test(item.photo_url)) {
+      thumb = el('img', { class: 'thumb', src: item.photo_url, alt: '' });
+    } else {
+      thumb = el('img', { class: 'thumb', alt: '' });
+      fillThumb(thumb, item.photo_url);
+    }
   } else {
     thumb = el('div', { class: 'thumb' }, '📦');
   }
-  const sub = [item.category, item.cost != null ? 'Cost ' + money(item.cost) : null].filter(Boolean).join(' · ');
+  const age = daysSince(item.purchase_date || item.created_at);
+  const stale = item.status !== 'sold' && age > STALE_DAYS;
+  const subParts = [
+    item.category,
+    item.cost != null ? 'Cost ' + money(item.cost) : null,
+    item.status !== 'sold' ? age + 'd in stock' : null
+  ].filter(Boolean);
   return el('div', {
     class: 'card item', onClick: () => itemActions(item, root)
   }, [
     thumb,
     el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, item.name),
-      el('div', { class: 'sub' }, sub || '—')
+      el('div', { class: 'title' }, [item.name, stale ? el('span', { class: 'badge-stale' }, 'Stale') : null]),
+      el('div', { class: 'sub' }, subParts.join(' · ') || '—')
     ]),
     el('span', { class: 'pill ' + item.status }, item.status.replace('_', ' '))
   ]);
@@ -141,6 +273,17 @@ function saleRow(s, root) {
   ]);
 }
 
+function expenseRow(e, root) {
+  return el('div', { class: 'card item', onClick: () => expenseActions(e, root) }, [
+    el('div', { class: 'thumb' }, '🧾'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, e.category || 'Expense'),
+      el('div', { class: 'sub' }, [e.expense_date ? fmtDate(e.expense_date) : null, e.note].filter(Boolean).join(' · ') || '—')
+    ]),
+    el('div', { class: 'amt neg v' }, money(-(Number(e.amount) || 0)))
+  ]);
+}
+
 // ── Actions ──
 function itemActions(item, root) {
   const acts = [];
@@ -153,6 +296,22 @@ function itemActions(item, root) {
 function saleActions(s, root) {
   actionSheet(s.item_name || 'Sale', [
     { label: '🗑️ Delete sale', danger: true, onClick: () => deleteSale(s, root) }
+  ]);
+}
+
+function expenseActions(e, root) {
+  actionSheet(e.category || 'Expense', [
+    { label: '🗑️ Delete', danger: true, onClick: () => {
+      confirmModal({
+        title: 'Delete expense?', confirmText: 'Delete',
+        onConfirm: async () => {
+          const { error } = await sb.from('resell_expenses').delete().eq('id', e.id);
+          if (error) throw error;
+          toast('Deleted');
+          renderResell(root);
+        }
+      });
+    } }
   ]);
 }
 
@@ -183,6 +342,24 @@ function addItemForm(root) {
       if (error) throw error;
       if (photo) await uploadPhoto(data.id, photo);
       toast('Item added', 'ok');
+      renderResell(root);
+    }
+  });
+}
+
+// Prefill the add-item form from a saved product (image_url copied as-is; no upload).
+function addItemFromProduct(product, root) {
+  formModal({
+    title: 'Add: ' + product.name,
+    fields: itemFields({ name: product.name, cost: product.default_cost, category: product.category }),
+    submitText: 'Add item',
+    onSubmit: async v => {
+      const payload = { ...v, user_id: getUid() };
+      if (product.image_url) payload.photo_url = product.image_url;
+      const { error } = await sb.from('resell_items').insert(payload);
+      if (error) throw error;
+      toast('Item added', 'ok');
+      segment = 'inventory';
       renderResell(root);
     }
   });
@@ -228,13 +405,34 @@ function markSoldForm(item, root) {
   });
 }
 
+function addExpenseForm(root) {
+  formModal({
+    title: 'Add expense',
+    fields: [
+      { name: 'category', label: 'Category', placeholder: 'Postage, packaging, subscription…' },
+      { name: 'amount', label: 'Amount', type: 'number', step: '0.01', min: '0', required: true },
+      { name: 'expense_date', label: 'Date', type: 'date', value: todayISO() },
+      { name: 'note', label: 'Note (optional)', type: 'textarea' }
+    ],
+    submitText: 'Add expense',
+    onSubmit: async v => {
+      const { error } = await sb.from('resell_expenses').insert({ ...v, user_id: getUid() });
+      if (error) throw error;
+      toast('Expense added', 'ok');
+      renderResell(root);
+    }
+  });
+}
+
 function deleteItem(item, root) {
   confirmModal({
     title: 'Delete item?',
     message: `"${item.name}" will be removed. Any logged sale for it stays in your history.`,
     confirmText: 'Delete',
     onConfirm: async () => {
-      if (item.photo_url) await sb.storage.from(BUCKET).remove([item.photo_url]).catch(() => {});
+      if (item.photo_url && !/^https?:\/\//i.test(item.photo_url)) {
+        await sb.storage.from(BUCKET).remove([item.photo_url]).catch(() => {});
+      }
       const { error } = await sb.from('resell_items').delete().eq('id', item.id);
       if (error) throw error;
       toast('Deleted');
