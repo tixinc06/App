@@ -5,15 +5,16 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, fmtDate, todayISO, isoOf, toast, formModal, confirmModal, actionSheet,
-  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp, segmented
+  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp, segmented, celebrate
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
 import { renderTrain } from './workouts.js';
+import { renderProgress } from './progress.js';
+import { detectAndSavePRs, checkGoals, award } from './progression.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
 
 const COMING_SOON = {
-  progress: 'Progress — level, XP, PRs & goals',
   ranks: 'Ranks — strength tiers per exercise',
   shop: 'Shop — banners, boosters & themes',
   friends: 'Friends — add, share plans & compare'
@@ -31,6 +32,11 @@ export async function renderFitness(root) {
 
   const body = el('div');
   root.append(body);
+
+  if (fitSegment === 'progress') {
+    await renderProgress(body, root);
+    return;
+  }
 
   if (fitSegment !== 'train') {
     body.append(el('div', { class: 'card', style: 'padding:32px 20px;text-align:center' }, [
@@ -312,7 +318,25 @@ export function workoutBuilder(root, prefill) {
       });
       if (error) throw error;
       closeModal();
-      toast('Workout saved 💪', 'ok');
+
+      // Progression is best-effort: PR/goal detection and XP/Plate awards
+      // should never block the workout save itself if something goes wrong.
+      let gains = null;
+      try {
+        const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
+        const prEvents = await detectAndSavePRs(exercises);
+        const goalEvents = await checkGoals();
+        gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
+      } catch { /* progression failure shouldn't hide that the workout saved */ }
+
+      if (gains) {
+        const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
+        if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
+        toast(bits.join(' · '), 'ok');
+        if (gains.levelsGained > 0) celebrate();
+      } else {
+        toast('Workout saved 💪', 'ok');
+      }
       renderFitness(root);
     } catch (ex) {
       err.textContent = ex.message || 'Failed to save.';
