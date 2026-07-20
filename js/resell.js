@@ -611,10 +611,10 @@ function markSoldForm(item, root) {
         name: 'qty_sold', label: `Quantity sold (of ${maxQty} in stock)`,
         type: 'number', step: '1', min: '1', max: String(maxQty), required: true, value: maxQty
       }] : []),
-      { name: 'sale_price', label: 'Sale price' + (multi ? ' (total for units sold)' : ''), type: 'number', step: '0.01', min: '0', required: true, value: item.list_price },
+      { name: 'sale_price', label: multi ? 'Sale price per unit' : 'Sale price', type: 'number', step: '0.01', min: '0', required: true, value: item.list_price },
       { name: 'platform', label: 'Platform', placeholder: 'eBay, Depop, Vinted…' },
-      { name: 'fees', label: 'Selling fees', type: 'number', step: '0.01', min: '0', value: 0 },
-      { name: 'shipping_cost', label: 'Shipping cost you paid', type: 'number', step: '0.01', min: '0', value: 0 },
+      { name: 'fees', label: 'Selling fees' + (multi ? ' (total)' : ''), type: 'number', step: '0.01', min: '0', value: 0 },
+      { name: 'shipping_cost', label: 'Shipping cost you paid' + (multi ? ' (total)' : ''), type: 'number', step: '0.01', min: '0', value: 0 },
       { name: 'sold_date', label: 'Sold date', type: 'date', value: todayISO() }
     ],
     submitText: 'Log sale',
@@ -622,7 +622,8 @@ function markSoldForm(item, root) {
       const { qty_sold, ...rest } = v;
       const qtySold = Math.min(maxQty, Math.max(1, Number(qty_sold) || maxQty));
       const sale = {
-        ...rest, user_id: getUid(), item_id: item.id,
+        ...rest, sale_price: (Number(rest.sale_price) || 0) * (multi ? qtySold : 1),
+        user_id: getUid(), item_id: item.id,
         cost_snapshot: (Number(item.cost) || 0) * qtySold, item_name: item.name, quantity: qtySold
       };
       const { error } = await sb.from('resell_sales').insert(sale);
