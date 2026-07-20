@@ -83,25 +83,9 @@ textarea{resize:vertical; min-height:70px}
 .app-header-inner{max-width:640px; margin:0 auto; padding:16px 18px;
   display:flex; align-items:center; justify-content:space-between}
 .app-header strong{font-size:19px; font-weight:800; letter-spacing:-.3px}
+.title-group{display:flex; align-items:center}
 .view{flex:1; width:100%; max-width:640px; margin:0 auto;
-  padding:18px 18px calc(96px + var(--safe-b)); width:100%}
-
-/* Bottom tab bar */
-.tabbar{
-  position:fixed; left:0; right:0; bottom:0; z-index:30;
-  display:flex; justify-content:center; gap:6px;
-  padding:8px 10px calc(8px + var(--safe-b));
-  background:rgba(11,11,18,.86); backdrop-filter:blur(16px);
-  border-top:1px solid var(--border-soft);
-}
-.tab{
-  flex:1; max-width:150px; border:none; background:none; color:var(--muted-dim);
-  display:flex; flex-direction:column; align-items:center; gap:3px;
-  padding:6px 4px; border-radius:12px; font-size:11px; font-weight:600;
-}
-.tab .tab-ico{font-size:20px; filter:grayscale(.4) opacity(.7); transition:.15s}
-.tab.active{color:var(--text)}
-.tab.active .tab-ico{filter:none; transform:translateY(-1px)}
+  padding:18px 18px calc(100px + var(--safe-b)); width:100%}
 
 /* ── Content primitives used by views ─────────────────────────────────────── */
 .section-head{display:flex; align-items:center; justify-content:space-between; margin:4px 2px 14px}
@@ -131,14 +115,14 @@ textarea{resize:vertical; min-height:70px}
 .empty{text-align:center; padding:40px 20px; color:var(--muted-dim)}
 .empty .big{font-size:34px; margin-bottom:10px}
 
-.fab{position:fixed; right:18px; bottom:calc(84px + var(--safe-b)); z-index:25;
+.fab{position:fixed; right:18px; bottom:calc(18px + var(--safe-b)); z-index:25;
   width:56px; height:56px; border-radius:50%; border:none; font-size:28px; color:#fff;
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
   box-shadow:0 10px 24px -6px rgba(109,94,252,.7); display:grid; place-items:center}
 .fab:active{transform:scale(.94)}
 
 /* ── Toasts ───────────────────────────────────────────────────────────────── */
-.toast-host{position:fixed; left:0; right:0; bottom:calc(96px + var(--safe-b)); z-index:60;
+.toast-host{position:fixed; left:0; right:0; bottom:calc(88px + var(--safe-b)); z-index:60;
   display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none}
 .toast{background:var(--card2); border:1px solid var(--border); color:var(--text);
   padding:11px 16px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:var(--shadow);
@@ -226,3 +210,35 @@ textarea{resize:vertical; min-height:70px}
   white-space:nowrap}
 .product-card .p-sub{font-size:12px; color:var(--muted); margin-top:2px}
 .product-card .p-link{font-size:11px; color:var(--primary-soft); font-weight:600; margin-top:6px; display:block}
+
+/* ── Break-even meter ─────────────────────────────────────────────────────── */
+.meter-label{font-size:13px; font-weight:600; color:var(--muted); margin-bottom:8px}
+.meter{height:10px; border-radius:99px; background:var(--bg2); overflow:hidden}
+.meter-fill{height:100%; border-radius:99px;
+  background:linear-gradient(90deg,var(--primary-soft),var(--green)); transition:width .3s ease}
+
+/* ── Inventory search/sort ────────────────────────────────────────────────── */
+.search-row{margin-bottom:10px}
+.search-row input{margin-top:0}
+
+/* ── Returned pill ────────────────────────────────────────────────────────── */
+.pill.returned{background:rgba(255,179,65,.14); color:var(--amber); margin-left:6px; vertical-align:middle}
+
+/* ── Home launcher ────────────────────────────────────────────────────────── */
+.home-greeting{margin:4px 2px 20px}
+.home-greeting h1{font-size:24px; font-weight:800; letter-spacing:-.4px}
+.home-cards{display:flex; flex-direction:column; gap:14px}
+.home-card{display:flex; align-items:center; gap:16px; padding:20px; cursor:pointer;
+  transition:transform .08s ease}
+.home-card:active{transform:scale(.98)}
+.home-card .home-ico{font-size:32px; width:56px; height:56px; border-radius:16px;
+  background:var(--bg2); display:flex; align-items:center; justify-content:center; flex-shrink:0}
+.home-card .home-body{flex:1; min-width:0}
+.home-card .home-name{font-weight:800; font-size:17px}
+.home-card .home-sub{font-size:13px; color:var(--muted); margin-top:3px}
+.home-card .home-arrow{font-size:20px; color:var(--muted-dim)}
+
+/* ── Back button ──────────────────────────────────────────────────────────── */
+#back-btn{background:none; border:none; color:var(--text); font-size:20px; font-weight:700;
+  padding:4px 10px 4px 0; margin-right:2px; line-height:1}
+#back-btn:active{opacity:.6}

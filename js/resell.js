@@ -1,5 +1,6 @@
-// Reselling view: Overview (net position + monthly P&L calendar), Inventory
-// (in-stock items with aging), and Products (a shared + personal sourcing catalog).
+// Reselling view: Overview (net position + cash-flow P&L calendar + break-even meter),
+// Inventory (in-stock items with aging, search/sort), Products (shared + personal
+// sourcing catalog), and Insights (charts + sourcing intelligence).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
@@ -15,8 +16,9 @@ const STALE_DAYS = 60;
 const profitOf = s => (Number(s.sale_price) || 0) - (Number(s.fees) || 0) -
   (Number(s.shipping_cost) || 0) - (Number(s.cost_snapshot) || 0);
 
-let segment = 'overview'; // 'overview' | 'inventory' | 'products'
+let segment = 'overview'; // 'overview' | 'inventory' | 'products' | 'insights'
 let calYear = null, calMonth = null; // calendar's currently-viewed month
+let invSearch = '', invSort = 'newest', invStatus = 'all'; // inventory search/sort state
 
 async function loadData() {
   const [items, sales, expenses] = await Promise.all([
@@ -45,6 +47,40 @@ function daysSince(dateStr) {
   return Math.max(0, Math.round((now - d) / 86400000));
 }
 
+// Build a cash-flow ledger for the calendar/day-modal: purchases (−cost×originalQty on
+// purchase date), sales revenue (+sale_price−fees−shipping on sold date, non-returned
+// only), and expenses (−amount on expense date). Grouped by ISO date.
+function buildLedger(items, activeSales, expenses) {
+  const ledger = {};
+  const add = (iso, amount, type, label) => {
+    if (!iso) return;
+    const day = ledger[iso] || { amount: 0, entries: [] };
+    day.amount += amount;
+    day.entries.push({ type, label, amount });
+    ledger[iso] = day;
+  };
+
+  const soldQtyByItem = {};
+  for (const s of activeSales) {
+    if (!s.item_id) continue;
+    soldQtyByItem[s.item_id] = (soldQtyByItem[s.item_id] || 0) + (Number(s.quantity) || 1);
+  }
+  for (const item of items) {
+    const originalQty = (Number(item.quantity) || 0) + (soldQtyByItem[item.id] || 0);
+    if (originalQty <= 0) continue;
+    const iso = (item.purchase_date || item.created_at || '').slice(0, 10);
+    add(iso, -((Number(item.cost) || 0) * originalQty), 'purchase', item.name);
+  }
+  for (const s of activeSales) {
+    const revenue = (Number(s.sale_price) || 0) - (Number(s.fees) || 0) - (Number(s.shipping_cost) || 0);
+    add(s.sold_date, revenue, 'sale', s.item_name || 'Sale');
+  }
+  for (const e of expenses) {
+    add(e.expense_date, -(Number(e.amount) || 0), 'expense', e.category || 'Expense');
+  }
+  return ledger;
+}
+
 export async function renderResell(root) {
   if (calYear == null) {
     const d = new Date();
@@ -54,7 +90,8 @@ export async function renderResell(root) {
   root.append(segmented([
     { value: 'overview', label: 'Overview' },
     { value: 'inventory', label: 'Inventory' },
-    { value: 'products', label: 'Products' }
+    { value: 'products', label: 'Products' },
+    { value: 'insights', label: 'Insights' }
   ], segment, v => { segment = v; renderResell(root); }));
 
   const body = el('div');
@@ -77,46 +114,60 @@ export async function renderResell(root) {
   body.innerHTML = '';
 
   if (segment === 'overview') renderOverview(body, data, root);
-  else renderInventory(body, data, root);
+  else if (segment === 'inventory') renderInventory(body, data, root);
+  else renderInsights(body, data, root);
 }
 
 // ── Overview segment ─────────────────────────────────────────────────────────
 function renderOverview(body, data, root) {
   const { items, sales, expenses } = data;
+  const activeSales = sales.filter(s => !s.returned);
+  const returnedSales = sales.filter(s => s.returned);
 
-  const totalRealizedProfit = sales.reduce((a, s) => a + profitOf(s), 0);
+  const totalRealizedProfit = activeSales.reduce((a, s) => a + profitOf(s), 0);
   const unsoldCost = items.filter(i => i.status !== 'sold')
     .reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
   const totalExpenses = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const netPosition = totalRealizedProfit - unsoldCost - totalExpenses;
 
-  const thisMonthPrefix = todayISO().slice(0, 7);
-  const thisMonthProfit = sales
-    .filter(s => s.sold_date && s.sold_date.slice(0, 7) === thisMonthPrefix)
-    .reduce((a, s) => a + profitOf(s), 0);
-
-  const investedSold = sales.reduce((a, s) => a + (Number(s.cost_snapshot) || 0), 0);
+  const investedSold = activeSales.reduce((a, s) => a + (Number(s.cost_snapshot) || 0), 0);
   const roi = investedSold > 0 ? (totalRealizedProfit / investedSold) * 100 : 0;
+
+  const ledger = buildLedger(items, activeSales, expenses);
+  const thisMonthPrefix = todayISO().slice(0, 7);
+  const thisMonthTotal = Object.entries(ledger)
+    .filter(([d]) => d.slice(0, 7) === thisMonthPrefix)
+    .reduce((a, [, day]) => a + day.amount, 0);
 
   body.append(el('div', { class: 'card net-card' }, [
     el('div', { class: 'k' }, 'Net position'),
     el('div', { class: 'v ' + (netPosition > 0 ? 'pos' : netPosition < 0 ? 'neg' : '') }, money(netPosition))
   ]));
 
-  body.append(el('div', { class: 'stat-grid' }, [
-    stat('This month', money(thisMonthProfit), thisMonthProfit > 0 ? 'pos' : thisMonthProfit < 0 ? 'neg' : ''),
-    stat('Inventory value', money(unsoldCost)),
-    stat('ROI', investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—', roi > 0 ? 'pos' : roi < 0 ? 'neg' : ''),
-    stat('Sold', String(sales.length))
+  // Break-even meter
+  const outstanding = unsoldCost + totalExpenses;
+  const bePct = outstanding > 0 ? Math.min(1, Math.max(0, totalRealizedProfit / outstanding)) : 1;
+  const beLabel = totalRealizedProfit >= outstanding
+    ? `Broken even (+${money(totalRealizedProfit - outstanding)} banked)`
+    : `${money(outstanding - totalRealizedProfit)} more profit to break even`;
+  body.append(el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:16px' }, [
+    el('div', { class: 'meter-label' }, beLabel),
+    el('div', { class: 'meter' }, [
+      el('div', { class: 'meter-fill', style: `width:${(bePct * 100).toFixed(1)}%` })
+    ])
   ]));
 
-  // Monthly P&L calendar
+  body.append(el('div', { class: 'stat-grid' }, [
+    stat('This month', money(thisMonthTotal), thisMonthTotal > 0 ? 'pos' : thisMonthTotal < 0 ? 'neg' : ''),
+    stat('Inventory value', money(unsoldCost)),
+    stat('ROI', investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—', roi > 0 ? 'pos' : roi < 0 ? 'neg' : ''),
+    stat('Sold', String(activeSales.length))
+  ]));
+
+  // Monthly P&L calendar (cash-flow: purchases −, sales revenue +, expenses −)
   const dayTotals = {};
-  for (const s of sales) {
-    if (!s.sold_date) continue;
-    const t = dayTotals[s.sold_date] || { profit: 0, count: 0 };
-    t.profit += profitOf(s); t.count += 1;
-    dayTotals[s.sold_date] = t;
+  for (const [iso, day] of Object.entries(ledger)) {
+    dayTotals[iso] = { profit: day.amount, count: day.entries.filter(e => e.type === 'sale').length };
   }
   body.append(plCalendar({
     year: calYear, month: calMonth, dayTotals,
@@ -126,66 +177,87 @@ function renderOverview(body, data, root) {
       else if (calMonth > 11) { calMonth = 0; calYear++; }
       renderResell(root);
     },
-    onDayClick: iso => showDayModal(iso, sales, root)
+    onDayClick: iso => showDayModal(iso, ledger)
   }));
 
   body.append(el('button', {
     class: 'btn btn-block', style: 'margin-bottom:18px', onClick: () => addExpenseForm(root)
   }, '＋ Add expense'));
 
-  // Insights charts
-  if (sales.length >= 2) {
-    body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Insights')]));
-    const dated = sales.filter(s => s.sold_date).sort((a, b) => (a.sold_date < b.sold_date ? -1 : 1));
-    if (dated.length >= 2) {
-      let cum = 0;
-      const series = dated.map(s => ({ t: s.sold_date, v: (cum += profitOf(s)) }));
-      body.append(chartCard('Cumulative profit', lineChart(series, { color: 'var(--green)', fmt: money })));
-    }
-    const byPlat = {};
-    for (const s of sales) {
-      const k = s.platform && s.platform.trim() ? s.platform.trim() : 'Other';
-      byPlat[k] = (byPlat[k] || 0) + profitOf(s);
-    }
-    const bars = Object.entries(byPlat)
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-    if (bars.length) body.append(chartCard('Profit by platform', barChart(bars, { fmt: money })));
-  }
-
   if (expenses.length) {
-    body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Expenses')]));
+    body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Expenses')]));
     body.append(el('div', { class: 'list' }, expenses.slice(0, 10).map(e => expenseRow(e, root))));
   }
 
-  if (sales.length) {
+  if (returnedSales.length) {
+    body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Returns')]));
+    body.append(el('div', { class: 'list' }, returnedSales.slice(0, 10).map(s => returnRow(s, root))));
+  }
+
+  if (activeSales.length) {
     body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recent sales')]));
-    body.append(el('div', { class: 'list' }, sales.slice(0, 10).map(s => saleRow(s, root))));
+    body.append(el('div', { class: 'list' }, activeSales.slice(0, 10).map(s => saleRevenueRow(s, root))));
   }
 
   body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
 }
 
-function showDayModal(iso, sales, root) {
-  const daySales = sales.filter(s => s.sold_date === iso);
-  const total = daySales.reduce((a, s) => a + profitOf(s), 0);
+function showDayModal(iso, ledger) {
+  const day = ledger[iso] || { amount: 0, entries: [] };
   openModal(el('div', {}, [
     el('h3', {}, fmtDate(iso)),
     el('p', { class: 'muted', style: 'margin-bottom:14px' },
-      `${daySales.length} sale${daySales.length === 1 ? '' : 's'} · ${money(total)} profit`),
-    el('div', { class: 'list' }, daySales.map(s => saleDetailRow(s, root))),
+      `${day.entries.length} entr${day.entries.length === 1 ? 'y' : 'ies'} · ${money(day.amount)} net`),
+    el('div', { class: 'list' }, day.entries.map(ledgerEntryRow)),
     el('button', { class: 'btn btn-ghost btn-block', style: 'margin-top:14px', onClick: closeModal }, 'Close')
   ]));
 }
 
-// Detailed sale row: Cost → Sold · margin % · ROI %.
+function ledgerEntryRow(entry) {
+  const icon = entry.type === 'purchase' ? '📦' : entry.type === 'sale' ? '💰' : '🧾';
+  const typeLabel = entry.type === 'purchase' ? 'Purchase' : entry.type === 'sale' ? 'Sale' : 'Expense';
+  return el('div', { class: 'card item' }, [
+    el('div', { class: 'thumb' }, icon),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, entry.label),
+      el('div', { class: 'sub' }, typeLabel)
+    ]),
+    el('div', { class: 'amt ' + (entry.amount >= 0 ? 'pos v' : 'neg v') }, money(entry.amount))
+  ]);
+}
+
+// Cash-flow row for Overview's Recent sales: shows revenue (sale price − fees − shipping).
+function saleRevenueRow(s, root) {
+  const revenue = (Number(s.sale_price) || 0) - (Number(s.fees) || 0) - (Number(s.shipping_cost) || 0);
+  const qty = Number(s.quantity) || 1;
+  return el('div', { class: 'card item', onClick: () => saleActions(s, root) }, [
+    el('div', { class: 'thumb' }, '💰'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, (s.item_name || 'Sale') + (qty > 1 ? ` ×${qty}` : '')),
+      el('div', { class: 'sub' }, [s.platform, s.sold_date ? fmtDate(s.sold_date) : null].filter(Boolean).join(' · ') || '—')
+    ]),
+    el('div', { class: 'amt ' + (revenue >= 0 ? 'pos v' : 'neg v') }, money(revenue))
+  ]);
+}
+
+function returnRow(s, root) {
+  return el('div', { class: 'card item', onClick: () => saleActions(s, root) }, [
+    el('div', { class: 'thumb' }, '↩️'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, [s.item_name || 'Sale', el('span', { class: 'pill returned' }, 'Returned')]),
+      el('div', { class: 'sub' }, [s.sold_date ? fmtDate(s.sold_date) : null, s.platform].filter(Boolean).join(' · ') || '—')
+    ]),
+    el('div', { class: 'amt dim' }, money(s.sale_price))
+  ]);
+}
+
+// Analytical row (Inventory → Recently sold): Cost → Sold · margin % · ROI %.
 function saleDetailRow(s, root) {
   const p = profitOf(s);
   const margin = s.sale_price ? (p / s.sale_price) * 100 : 0;
   const roi = s.cost_snapshot ? (p / s.cost_snapshot) * 100 : 0;
   const qty = Number(s.quantity) || 1;
-  return el('div', { class: 'card item', onClick: () => { closeModal(); saleActions(s, root); } }, [
+  return el('div', { class: 'card item', onClick: () => saleActions(s, root) }, [
     el('div', { class: 'thumb' }, '💰'),
     el('div', { class: 'grow' }, [
       el('div', { class: 'title' }, (s.item_name || 'Sale') + (qty > 1 ? ` ×${qty}` : '')),
@@ -198,31 +270,173 @@ function saleDetailRow(s, root) {
 // ── Inventory segment ────────────────────────────────────────────────────────
 function renderInventory(body, data, root) {
   const { items, sales } = data;
-  const inventory = items.filter(i => i.status !== 'sold');
-  const totalValue = inventory.reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
-  const avgAge = inventory.length
-    ? Math.round(inventory.reduce((a, i) => a + daysSince(i.purchase_date || i.created_at), 0) / inventory.length)
+  const activeSales = sales.filter(s => !s.returned);
+  const inventoryAll = items.filter(i => i.status !== 'sold');
+  const totalValue = inventoryAll.reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
+  const avgAge = inventoryAll.length
+    ? Math.round(inventoryAll.reduce((a, i) => a + daysSince(i.purchase_date || i.created_at), 0) / inventoryAll.length)
     : 0;
 
   body.append(el('div', { class: 'stat-grid' }, [
     stat('Inventory value', money(totalValue)),
-    stat('Items', String(inventory.length)),
-    stat('Avg age', inventory.length ? avgAge + 'd' : '—')
+    stat('Items', String(inventoryAll.length)),
+    stat('Avg age', inventoryAll.length ? avgAge + 'd' : '—')
   ]));
 
-  body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'In stock')]));
-  if (!inventory.length) {
-    body.append(emptyState('📦', 'No items yet. Tap + to add your first one.'));
-  } else {
-    body.append(el('div', { class: 'list' }, inventory.map(i => itemRow(i, root))));
+  const searchInput = el('input', { type: 'text', placeholder: 'Search name or category…', value: invSearch });
+  const sortSelect = el('select', {}, [
+    el('option', { value: 'newest' }, 'Newest'),
+    el('option', { value: 'oldest' }, 'Oldest'),
+    el('option', { value: 'age' }, 'Oldest in stock'),
+    el('option', { value: 'cost' }, 'Highest cost'),
+    el('option', { value: 'potential' }, 'Potential profit')
+  ]);
+  sortSelect.value = invSort;
+  const statusSelect = el('select', {}, [
+    el('option', { value: 'all' }, 'All statuses'),
+    el('option', { value: 'in_stock' }, 'In stock'),
+    el('option', { value: 'listed' }, 'Listed')
+  ]);
+  statusSelect.value = invStatus;
+
+  const listWrap = el('div');
+
+  function applyFilters() {
+    let list = inventoryAll;
+    if (invStatus !== 'all') list = list.filter(i => i.status === invStatus);
+    if (invSearch.trim()) {
+      const q = invSearch.trim().toLowerCase();
+      list = list.filter(i => (i.name || '').toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q));
+    }
+    list = [...list];
+    if (invSort === 'newest') list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    else if (invSort === 'oldest') list.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    else if (invSort === 'age') list.sort((a, b) => daysSince(b.purchase_date || b.created_at) - daysSince(a.purchase_date || a.created_at));
+    else if (invSort === 'cost') list.sort((a, b) => (Number(b.cost) || 0) - (Number(a.cost) || 0));
+    else if (invSort === 'potential') list.sort((a, b) =>
+      ((Number(b.list_price) || 0) - (Number(b.cost) || 0)) - ((Number(a.list_price) || 0) - (Number(a.cost) || 0)));
+    return list;
   }
 
-  if (sales.length) {
+  function renderList() {
+    const filtered = applyFilters();
+    listWrap.innerHTML = '';
+    if (!filtered.length) {
+      listWrap.append(emptyState('📦', inventoryAll.length ? 'No items match your search.' : 'No items yet. Tap + to add your first one.'));
+    } else {
+      listWrap.append(el('div', { class: 'list' }, filtered.map(i => itemRow(i, root))));
+    }
+  }
+
+  searchInput.addEventListener('input', () => { invSearch = searchInput.value; renderList(); });
+  sortSelect.addEventListener('change', () => { invSort = sortSelect.value; renderList(); });
+  statusSelect.addEventListener('change', () => { invStatus = statusSelect.value; renderList(); });
+
+  body.append(el('div', { class: 'search-row' }, [searchInput]));
+  body.append(el('div', { class: 'row', style: 'margin-bottom:18px' }, [sortSelect, statusSelect]));
+  body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'In stock')]));
+  body.append(listWrap);
+  renderList();
+
+  if (activeSales.length) {
     body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recently sold')]));
-    body.append(el('div', { class: 'list' }, sales.slice(0, 15).map(s => saleDetailRow(s, root))));
+    body.append(el('div', { class: 'list' }, activeSales.slice(0, 15).map(s => saleDetailRow(s, root))));
   }
 
   body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
+}
+
+// ── Insights segment ─────────────────────────────────────────────────────────
+function renderInsights(body, data, root) {
+  const { items, sales } = data;
+  const activeSales = sales.filter(s => !s.returned);
+
+  if (activeSales.length >= 2) {
+    const dated = activeSales.filter(s => s.sold_date).sort((a, b) => (a.sold_date < b.sold_date ? -1 : 1));
+    if (dated.length >= 2) {
+      let cum = 0;
+      const series = dated.map(s => ({ t: s.sold_date, v: (cum += profitOf(s)) }));
+      body.append(chartCard('Cumulative profit', lineChart(series, { color: 'var(--green)', fmt: money })));
+    }
+  }
+
+  const byPlat = {};
+  for (const s of activeSales) {
+    const k = s.platform && s.platform.trim() ? s.platform.trim() : 'Other';
+    byPlat[k] = (byPlat[k] || 0) + profitOf(s);
+  }
+  const platBars = Object.entries(byPlat).map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 6);
+  if (platBars.length) body.append(chartCard('Profit by platform', barChart(platBars, { fmt: money })));
+
+  const categoryBars = buildCategoryStats(items, activeSales).slice(0, 6);
+  if (categoryBars.length) body.append(chartCard('Profit by category', barChart(categoryBars, { fmt: money })));
+
+  const products = buildSourcingStats(items, sales);
+  body.append(el('div', { class: 'section-head', style: 'margin-top:8px' }, [el('h2', {}, 'Top products')]));
+  if (!products.length) {
+    body.append(emptyState('📊', 'Sell a few items to see product insights.'));
+  } else {
+    body.append(el('div', { class: 'list' }, products.slice(0, 10).map(sourcingRow)));
+  }
+}
+
+function buildCategoryStats(items, activeSales) {
+  const itemById = {};
+  for (const i of items) itemById[i.id] = i;
+  const byCat = {};
+  for (const s of activeSales) {
+    const item = s.item_id ? itemById[s.item_id] : null;
+    const cat = (item && item.category && item.category.trim()) ? item.category.trim() : 'Other';
+    byCat[cat] = (byCat[cat] || 0) + profitOf(s);
+  }
+  return Object.entries(byCat).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+}
+
+// Group all sales (active + returned) by item name for return-rate, and derive
+// units sold / avg profit from active sales only, plus a restock hint.
+function buildSourcingStats(items, sales) {
+  const byName = {};
+  for (const s of sales) {
+    const name = s.item_name || 'Unnamed';
+    const g = byName[name] || { active: [], all: [] };
+    g.all.push(s);
+    if (!s.returned) g.active.push(s);
+    byName[name] = g;
+  }
+  const stockByName = {};
+  for (const i of items) {
+    if (i.status === 'sold') continue;
+    stockByName[i.name] = (stockByName[i.name] || 0) + (Number(i.quantity) || 0);
+  }
+  const products = Object.entries(byName).map(([name, g]) => {
+    const unitsSold = g.active.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+    const totalProfit = g.active.reduce((a, s) => a + profitOf(s), 0);
+    const returnedCount = g.all.filter(s => s.returned).length;
+    const returnRate = g.all.length ? (returnedCount / g.all.length) * 100 : 0;
+    const inStock = stockByName[name] || 0;
+    return {
+      name, unitsSold, totalProfit,
+      avgProfit: unitsSold ? totalProfit / unitsSold : 0,
+      returnRate, inStock, restock: unitsSold > 0 && inStock === 0
+    };
+  }).filter(p => p.unitsSold > 0 || p.returnRate > 0);
+  products.sort((a, b) => b.totalProfit - a.totalProfit);
+  return products;
+}
+
+function sourcingRow(p) {
+  const bits = [`${p.unitsSold} sold`, `avg ${money(p.avgProfit)}`];
+  if (p.returnRate > 0) bits.push(`${p.returnRate.toFixed(0)}% returned`);
+  if (p.restock) bits.push('0 left — restock');
+  return el('div', { class: 'card item' }, [
+    el('div', { class: 'thumb' }, '📦'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, p.name),
+      el('div', { class: 'sub' }, bits.join(' · '))
+    ]),
+    el('div', { class: 'amt ' + (p.totalProfit >= 0 ? 'pos v' : 'neg v') }, money(p.totalProfit))
+  ]);
 }
 
 function stat(k, v, cls = '') {
@@ -272,18 +486,6 @@ function itemRow(item, root) {
   ]);
 }
 
-function saleRow(s, root) {
-  const p = profitOf(s);
-  return el('div', { class: 'card item', onClick: () => saleActions(s, root) }, [
-    el('div', { class: 'thumb' }, '💰'),
-    el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, s.item_name || 'Sale'),
-      el('div', { class: 'sub' }, [s.platform, s.sold_date ? fmtDate(s.sold_date) : null].filter(Boolean).join(' · ') || '—')
-    ]),
-    el('div', { class: 'amt ' + (p >= 0 ? 'pos v' : 'neg v') }, money(p))
-  ]);
-}
-
 function expenseRow(e, root) {
   return el('div', { class: 'card item', onClick: () => expenseActions(e, root) }, [
     el('div', { class: 'thumb' }, '🧾'),
@@ -305,9 +507,13 @@ function itemActions(item, root) {
 }
 
 function saleActions(s, root) {
-  actionSheet(s.item_name || 'Sale', [
-    { label: '🗑️ Delete sale', danger: true, onClick: () => deleteSale(s, root) }
-  ]);
+  const acts = [];
+  if (!s.returned) {
+    acts.push({ label: '↩️ Mark as returned', onClick: () => returnSaleForm(s, root) });
+    acts.push({ label: '✏️ Edit sale', onClick: () => editSaleForm(s, root) });
+  }
+  acts.push({ label: '🗑️ Delete sale', danger: true, onClick: () => deleteSale(s, root) });
+  actionSheet(s.item_name || 'Sale', acts);
 }
 
 function expenseActions(e, root) {
@@ -426,6 +632,63 @@ function markSoldForm(item, root) {
       const { error: e2 } = await sb.from('resell_items').update(update).eq('id', item.id);
       if (e2) throw e2;
       toast(remaining > 0 ? `Sold ${qtySold} — ${remaining} left in stock 🎉` : 'Sale logged 🎉', 'ok');
+      renderResell(root);
+    }
+  });
+}
+
+function editSaleForm(s, root) {
+  formModal({
+    title: 'Edit sale',
+    fields: [
+      { name: 'sale_price', label: 'Sale price', type: 'number', step: '0.01', min: '0', required: true, value: s.sale_price },
+      { name: 'platform', label: 'Platform', value: s.platform, placeholder: 'eBay, Depop, Vinted…' },
+      { name: 'fees', label: 'Selling fees', type: 'number', step: '0.01', min: '0', value: s.fees },
+      { name: 'shipping_cost', label: 'Shipping cost you paid', type: 'number', step: '0.01', min: '0', value: s.shipping_cost },
+      { name: 'sold_date', label: 'Sold date', type: 'date', value: s.sold_date || todayISO() }
+    ],
+    submitText: 'Save changes',
+    onSubmit: async v => {
+      const { error } = await sb.from('resell_sales').update(v).eq('id', s.id);
+      if (error) throw error;
+      toast('Saved', 'ok');
+      renderResell(root);
+    }
+  });
+}
+
+function returnSaleForm(s, root) {
+  formModal({
+    title: 'Return: ' + (s.item_name || 'Sale'),
+    fields: [
+      { name: 'return_cost', label: 'Return cost (postage/fees you ate, optional)', type: 'number', step: '0.01', min: '0', value: 0 }
+    ],
+    submitText: 'Mark as returned',
+    onSubmit: async v => {
+      const { error } = await sb.from('resell_sales').update({ returned: true }).eq('id', s.id);
+      if (error) throw error;
+
+      if (s.item_id) {
+        const { data: item, error: e1 } = await sb.from('resell_items')
+          .select('quantity,status').eq('id', s.item_id).single();
+        if (!e1 && item) {
+          const patch = { quantity: (Number(item.quantity) || 0) + (Number(s.quantity) || 1) };
+          if (item.status === 'sold') patch.status = 'in_stock';
+          const { error: e2 } = await sb.from('resell_items').update(patch).eq('id', s.item_id);
+          if (e2) throw e2;
+        }
+      }
+
+      const returnCost = Number(v.return_cost) || 0;
+      if (returnCost > 0) {
+        const { error: e3 } = await sb.from('resell_expenses').insert({
+          user_id: getUid(), category: 'Return', amount: returnCost,
+          expense_date: todayISO(), note: s.item_name || 'Return'
+        });
+        if (e3) throw e3;
+      }
+
+      toast('Marked as returned ↩️', 'ok');
       renderResell(root);
     }
   });

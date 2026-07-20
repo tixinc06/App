@@ -61,24 +61,15 @@
 <div id="app" class="app" hidden>
   <header class="app-header">
     <div class="app-header-inner">
-      <strong id="view-title">Reselling</strong>
+      <div class="title-group">
+        <button id="back-btn" hidden aria-label="Back">‹</button>
+        <strong id="view-title">Home</strong>
+      </div>
       <button id="logout-btn" class="link" title="Log out">Log out</button>
     </div>
   </header>
 
   <main id="view" class="view"><!-- active view renders here --></main>
-
-  <nav class="tabbar">
-    <button class="tab" data-tab="resell" aria-label="Reselling">
-      <span class="tab-ico">📦</span><span>Resell</span>
-    </button>
-    <button class="tab" data-tab="food" aria-label="Food">
-      <span class="tab-ico">🍽️</span><span>Food</span>
-    </button>
-    <button class="tab" data-tab="fitness" aria-label="Fitness">
-      <span class="tab-ico">💪</span><span>Fitness</span>
-    </button>
-  </nav>
 </div>
 
 <!-- Toasts + modal host -->

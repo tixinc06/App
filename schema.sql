@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS resell_sales (
   item_name     TEXT DEFAULT '',              -- name snapshot (survives item deletion)
   sold_date     DATE,
   quantity      INTEGER NOT NULL DEFAULT 1,
+  returned      BOOLEAN NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
