@@ -1,6 +1,6 @@
 // Reusable monthly P&L calendar (trading-journal style): a month grid where each
 // day shows that day's realized profit + sale count, colored green/red.
-import { el, money, todayISO } from './ui.js';
+import { el, money, todayISO, countUp, staggerChildren } from './ui.js';
 
 // dayTotals: Map/object of 'YYYY-MM-DD' -> { profit: number, count: number }
 // onDayClick(dateISO) is called when a day with sales is tapped.
@@ -17,10 +17,12 @@ export function plCalendar({ year, month, dayTotals, onDayClick, onNav }) {
       .filter(([d]) => d.slice(0, 7) === isoMonth(year, month))
       .reduce((a, [, v]) => a + v.profit, 0);
 
+    const plValueEl = el('div', { class: 'pl-value ' + (monthTotal > 0 ? 'pos' : monthTotal < 0 ? 'neg' : '') });
+
     card.append(
       el('div', { class: 'cal-header' }, [
         el('div', { class: 'pl-label' }, 'Monthly P/L'),
-        el('div', { class: 'pl-value ' + (monthTotal > 0 ? 'pos' : monthTotal < 0 ? 'neg' : '') }, money(monthTotal))
+        plValueEl
       ]),
       el('div', { class: 'cal-nav' }, [
         el('button', { class: 'btn btn-sm btn-ghost', onClick: () => onNav(-1) }, '‹'),
@@ -29,6 +31,7 @@ export function plCalendar({ year, month, dayTotals, onDayClick, onNav }) {
       ]),
       grid()
     );
+    countUp(plValueEl, monthTotal, money);
   }
 
   function grid() {
@@ -69,6 +72,7 @@ export function plCalendar({ year, month, dayTotals, onDayClick, onNav }) {
       ]);
       g.append(cell);
     }
+    staggerChildren(g, 20);
     return g;
   }
 }

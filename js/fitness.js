@@ -3,7 +3,7 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, fmtDate, todayISO, isoOf, toast, formModal, confirmModal, actionSheet,
-  emptyState, openModal, closeModal
+  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
 
@@ -39,7 +39,7 @@ function weeklyCounts(workouts, weeks) {
 
 export async function renderFitness(root) {
   root.innerHTML = '';
-  root.append(el('p', { class: 'muted' }, 'Loading…'));
+  root.append(skeleton(1, 'block'), skeleton(4, 'item'));
   let data;
   try {
     data = await loadData();
@@ -55,28 +55,33 @@ export async function renderFitness(root) {
   const latest = weights[0];
   const prev = weights[1];
   const delta = latest && prev ? Number(latest.weight) - Number(prev.weight) : null;
+  const weightNumEl = el('span', {}, latest ? '' : '—');
   root.append(el('div', { class: 'card', style: 'padding:18px;margin-bottom:20px' }, [
     el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
       el('div', {}, [
         el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Bodyweight'),
-        el('div', { style: 'font-size:28px;font-weight:800;margin-top:4px' },
-          latest ? num(latest.weight) + (delta != null
-            ? ` ${delta >= 0 ? '▲' : '▼'} ${num(Math.abs(delta))}` : '') : '—')
+        el('div', { style: 'font-size:28px;font-weight:800;margin-top:4px' }, [
+          weightNumEl,
+          (latest && delta != null) ? el('span', {}, ` ${delta >= 0 ? '▲' : '▼'} ${num(Math.abs(delta))}`) : null
+        ])
       ]),
       el('button', { class: 'btn btn-sm btn-primary', onClick: () => addWeightForm(root) }, '＋ Log')
     ]),
     weights.length ? el('div', { class: 'dim', style: 'font-size:12px;margin-top:8px' },
       'Last: ' + fmtDate(latest.entry_date)) : null
   ]));
+  if (latest) countUp(weightNumEl, Number(latest.weight), num);
 
   if (weights.length > 1) {
     root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weight history')]));
-    root.append(el('div', { class: 'list', style: 'margin-bottom:22px' },
+    const weightList = el('div', { class: 'list', style: 'margin-bottom:22px' },
       weights.slice(0, 8).map(w =>
         el('div', { class: 'card item', onClick: () => weightActions(w, root) }, [
           el('div', { class: 'grow' }, [el('div', { class: 'title' }, num(w.weight))]),
           el('div', { class: 'sub' }, fmtDate(w.entry_date))
-        ]))));
+        ])));
+    staggerChildren(weightList);
+    root.append(weightList);
   }
 
   // ── Bodyweight trend ──
@@ -90,7 +95,9 @@ export async function renderFitness(root) {
   if (!workouts.length) {
     root.append(emptyState('💪', 'No workouts yet. Tap + to log one.'));
   } else {
-    root.append(el('div', { class: 'list' }, workouts.map(w => workoutRow(w, root))));
+    const workoutList = el('div', { class: 'list' }, workouts.map(w => workoutRow(w, root)));
+    staggerChildren(workoutList);
+    root.append(workoutList);
 
     const bars = weeklyCounts(workouts, 8);
     if (bars.some(b => b.value > 0)) {

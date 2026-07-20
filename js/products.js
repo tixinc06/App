@@ -2,7 +2,7 @@
 // Lets people save sourcing links/images and quickly start a new inventory item from one.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
-import { el, money, toast, formModal, confirmModal, actionSheet, emptyState, segmented } from './ui.js';
+import { el, money, toast, formModal, confirmModal, actionSheet, emptyState, segmented, skeleton, staggerChildren } from './ui.js';
 
 const BUCKET = 'product-images';
 let scope = 'shared'; // 'shared' | 'mine'
@@ -27,7 +27,7 @@ export async function renderProducts(root, onAddToInventory) {
 
   const list = el('div');
   root.append(list);
-  list.append(el('p', { class: 'muted' }, 'Loading…'));
+  list.append(skeleton(4, 'grid'));
 
   let products;
   try {
@@ -46,6 +46,7 @@ export async function renderProducts(root, onAddToInventory) {
   } else {
     const grid = el('div', { class: 'product-grid' });
     for (const p of products) grid.append(productCard(p, root, onAddToInventory));
+    staggerChildren(grid);
     list.append(grid);
   }
 

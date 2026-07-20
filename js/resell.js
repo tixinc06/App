@@ -5,7 +5,7 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, money, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet, emptyState,
-  segmented, openModal, closeModal
+  segmented, openModal, closeModal, skeleton, staggerChildren, countUp, celebrate
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
 import { plCalendar } from './calendar.js';
@@ -102,7 +102,7 @@ export async function renderResell(root) {
     return;
   }
 
-  body.append(el('p', { class: 'muted' }, 'Loading…'));
+  body.append(skeleton(1, 'block'), skeleton(4, 'stat'), skeleton(1, 'block'), skeleton(4, 'item'));
   let data;
   try {
     data = await loadData();
@@ -139,10 +139,12 @@ function renderOverview(body, data, root) {
     .filter(([d]) => d.slice(0, 7) === thisMonthPrefix)
     .reduce((a, [, day]) => a + day.amount, 0);
 
+  const netValEl = el('div', { class: 'v ' + (netPosition > 0 ? 'pos' : netPosition < 0 ? 'neg' : '') });
   body.append(el('div', { class: 'card net-card' }, [
     el('div', { class: 'k' }, 'Net position'),
-    el('div', { class: 'v ' + (netPosition > 0 ? 'pos' : netPosition < 0 ? 'neg' : '') }, money(netPosition))
+    netValEl
   ]));
+  countUp(netValEl, netPosition, money);
 
   // Break-even meter
   const outstanding = unsoldCost + totalExpenses;
@@ -158,10 +160,12 @@ function renderOverview(body, data, root) {
   ]));
 
   body.append(el('div', { class: 'stat-grid' }, [
-    stat('This month', money(thisMonthTotal), thisMonthTotal > 0 ? 'pos' : thisMonthTotal < 0 ? 'neg' : ''),
-    stat('Inventory value', money(unsoldCost)),
-    stat('ROI', investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—', roi > 0 ? 'pos' : roi < 0 ? 'neg' : ''),
-    stat('Sold', String(activeSales.length))
+    stat('This month', money(thisMonthTotal), thisMonthTotal > 0 ? 'pos' : thisMonthTotal < 0 ? 'neg' : '',
+      vEl => countUp(vEl, thisMonthTotal, money)),
+    stat('Inventory value', money(unsoldCost), '', vEl => countUp(vEl, unsoldCost, money)),
+    stat('ROI', investedSold ? (roi >= 0 ? '+' : '') + roi.toFixed(0) + '%' : '—', roi > 0 ? 'pos' : roi < 0 ? 'neg' : '',
+      investedSold ? vEl => countUp(vEl, roi, v => (v >= 0 ? '+' : '') + v.toFixed(0) + '%') : undefined),
+    stat('Sold', String(activeSales.length), '', vEl => countUp(vEl, activeSales.length, v => String(Math.round(v))))
   ]));
 
   // Monthly P&L calendar (cash-flow: purchases −, sales revenue +, expenses −)
@@ -186,17 +190,23 @@ function renderOverview(body, data, root) {
 
   if (expenses.length) {
     body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Expenses')]));
-    body.append(el('div', { class: 'list' }, expenses.slice(0, 10).map(e => expenseRow(e, root))));
+    const expenseList = el('div', { class: 'list' }, expenses.slice(0, 10).map(e => expenseRow(e, root)));
+    staggerChildren(expenseList);
+    body.append(expenseList);
   }
 
   if (returnedSales.length) {
     body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Returns')]));
-    body.append(el('div', { class: 'list' }, returnedSales.slice(0, 10).map(s => returnRow(s, root))));
+    const returnsList = el('div', { class: 'list' }, returnedSales.slice(0, 10).map(s => returnRow(s, root)));
+    staggerChildren(returnsList);
+    body.append(returnsList);
   }
 
   if (activeSales.length) {
     body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recent sales')]));
-    body.append(el('div', { class: 'list' }, activeSales.slice(0, 10).map(s => saleRevenueRow(s, root))));
+    const recentList = el('div', { class: 'list' }, activeSales.slice(0, 10).map(s => saleRevenueRow(s, root)));
+    staggerChildren(recentList);
+    body.append(recentList);
   }
 
   body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
@@ -278,9 +288,10 @@ function renderInventory(body, data, root) {
     : 0;
 
   body.append(el('div', { class: 'stat-grid' }, [
-    stat('Inventory value', money(totalValue)),
-    stat('Items', String(inventoryAll.length)),
-    stat('Avg age', inventoryAll.length ? avgAge + 'd' : '—')
+    stat('Inventory value', money(totalValue), '', vEl => countUp(vEl, totalValue, money)),
+    stat('Items', String(inventoryAll.length), '', vEl => countUp(vEl, inventoryAll.length, v => String(Math.round(v)))),
+    stat('Avg age', inventoryAll.length ? avgAge + 'd' : '—', '',
+      inventoryAll.length ? vEl => countUp(vEl, avgAge, v => Math.round(v) + 'd') : undefined)
   ]));
 
   const searchInput = el('input', { type: 'text', placeholder: 'Search name or category…', value: invSearch });
@@ -318,13 +329,17 @@ function renderInventory(body, data, root) {
     return list;
   }
 
-  function renderList() {
+  // `animate` is only true on the first mount — re-triggering the stagger
+  // animation on every keystroke while searching would be distracting, not polished.
+  function renderList(animate = false) {
     const filtered = applyFilters();
     listWrap.innerHTML = '';
     if (!filtered.length) {
       listWrap.append(emptyState('📦', inventoryAll.length ? 'No items match your search.' : 'No items yet. Tap + to add your first one.'));
     } else {
-      listWrap.append(el('div', { class: 'list' }, filtered.map(i => itemRow(i, root))));
+      const filteredList = el('div', { class: 'list' }, filtered.map(i => itemRow(i, root)));
+      if (animate) staggerChildren(filteredList);
+      listWrap.append(filteredList);
     }
   }
 
@@ -336,11 +351,13 @@ function renderInventory(body, data, root) {
   body.append(el('div', { class: 'row', style: 'margin-bottom:18px' }, [sortSelect, statusSelect]));
   body.append(el('div', { class: 'section-head' }, [el('h2', {}, 'In stock')]));
   body.append(listWrap);
-  renderList();
+  renderList(true);
 
   if (activeSales.length) {
     body.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Recently sold')]));
-    body.append(el('div', { class: 'list' }, activeSales.slice(0, 15).map(s => saleDetailRow(s, root))));
+    const soldList = el('div', { class: 'list' }, activeSales.slice(0, 15).map(s => saleDetailRow(s, root)));
+    staggerChildren(soldList);
+    body.append(soldList);
   }
 
   body.append(el('button', { class: 'fab', title: 'Add item', onClick: () => addItemForm(root) }, '+'));
@@ -377,7 +394,9 @@ function renderInsights(body, data, root) {
   if (!products.length) {
     body.append(emptyState('📊', 'Sell a few items to see product insights.'));
   } else {
-    body.append(el('div', { class: 'list' }, products.slice(0, 10).map(sourcingRow)));
+    const productsList = el('div', { class: 'list' }, products.slice(0, 10).map(sourcingRow));
+    staggerChildren(productsList);
+    body.append(productsList);
   }
 }
 
@@ -439,10 +458,14 @@ function sourcingRow(p) {
   ]);
 }
 
-function stat(k, v, cls = '') {
+// If `animate` is given, the value starts blank and counts up once mounted
+// (animate receives the created value element).
+function stat(k, v, cls = '', animate) {
+  const vEl = el('div', { class: 'v ' + cls }, animate ? '' : v);
+  if (animate) animate(vEl);
   return el('div', { class: 'card stat' }, [
     el('div', { class: 'k' }, k),
-    el('div', { class: 'v ' + cls }, v)
+    vEl
   ]);
 }
 
@@ -633,6 +656,7 @@ function markSoldForm(item, root) {
       const { error: e2 } = await sb.from('resell_items').update(update).eq('id', item.id);
       if (e2) throw e2;
       toast(remaining > 0 ? `Sold ${qtySold} — ${remaining} left in stock 🎉` : 'Sale logged 🎉', 'ok');
+      celebrate();
       renderResell(root);
     }
   });

@@ -1,7 +1,10 @@
-// Shared UI helpers: DOM building, toasts, modals, and formatting.
+// Shared UI helpers: DOM building, toasts, modals, formatting, and animation.
 
 // Currency symbol used across the app.
 export const CUR = '£';
+
+export const prefersReducedMotion = () =>
+  window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Tiny hyperscript-style DOM builder.
 //   el('div', {class:'x', onClick:fn}, ['hi', childNode])
@@ -55,15 +58,29 @@ export function toast(msg, type = '') {
   const host = document.getElementById('toast-host');
   const t = el('div', { class: 'toast ' + type }, msg);
   host.append(t);
-  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 2200);
+  setTimeout(() => { t.classList.add('leaving'); setTimeout(() => t.remove(), 260); }, 2200);
 }
 
 // ── Modals ──────────────────────────────────────────────────────────────────
+// A generation counter guards against a delayed close (from an animation) hiding
+// a DIFFERENT modal that was opened again before the close animation finished.
+let modalGen = 0;
 export function closeModal() {
   const h = document.getElementById('modal-host');
-  h.hidden = true; h.innerHTML = '';
+  if (h.hidden) return;
+  const myGen = ++modalGen;
+  const finish = () => { if (myGen === modalGen) { h.hidden = true; h.innerHTML = ''; } };
+  const modal = h.querySelector('.modal');
+  if (modal && !prefersReducedMotion()) {
+    modal.classList.add('closing');
+    modal.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, 240); // fallback in case animationend doesn't fire
+  } else {
+    finish();
+  }
 }
 export function openModal(contentNode) {
+  modalGen++; // invalidate any pending delayed close from a previous modal
   const h = document.getElementById('modal-host');
   h.innerHTML = '';
   const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close', onClick: closeModal }, '✕');
@@ -161,16 +178,135 @@ export function emptyState(emoji, text) {
   return el('div', { class: 'empty' }, [el('div', { class: 'big' }, emoji), el('div', {}, text)]);
 }
 
+// ── Animation helpers ────────────────────────────────────────────────────────
+
+// Marks each child of `container` to fade/slide in with a staggered delay.
+// Call AFTER all children are appended. `max` caps how many get a distinct delay
+// (later items reuse the last delay so a long list doesn't take forever to settle).
+export function staggerChildren(container, max = 12) {
+  if (!container) return;
+  [...container.children].forEach((child, i) => {
+    child.classList.add('stagger-item');
+    child.style.setProperty('--i', String(Math.min(i, max)));
+  });
+}
+
+// Shimmering placeholder cards shown while a view's data is loading.
+// variant: 'item' (list row), 'stat' (stat-grid cell), 'block' (large card), or 'grid' (2-col cards).
+export function skeleton(count = 3, variant = 'item') {
+  if (variant === 'stat') {
+    const wrap = el('div', { class: 'stat-grid' });
+    for (let i = 0; i < count; i++) wrap.append(el('div', { class: 'skeleton skel-stat' }));
+    return wrap;
+  }
+  if (variant === 'block') {
+    return el('div', { class: 'skeleton skel-block' });
+  }
+  if (variant === 'grid') {
+    const wrap = el('div', { class: 'product-grid' });
+    for (let i = 0; i < count; i++) wrap.append(el('div', { class: 'skeleton', style: 'aspect-ratio:1;' }));
+    return wrap;
+  }
+  const wrap = el('div', { class: 'list' });
+  for (let i = 0; i < count; i++) wrap.append(el('div', { class: 'skeleton skel-item' }));
+  return wrap;
+}
+
+// Animates a numeric headline from 0 up to `target`, formatting each frame with
+// `formatFn` (e.g. money, num). Snaps straight to the final value if the user
+// prefers reduced motion.
+// Uses setTimeout (not requestAnimationFrame) so the animation still runs when
+// the tab is backgrounded/not yet painted (rAF is suspended in that case).
+export function countUp(node, target, formatFn = String, duration = 650) {
+  if (!node) return;
+  const value = Number(target) || 0;
+  if (prefersReducedMotion()) { node.textContent = formatFn(value); return; }
+  const start = performance.now();
+  const step = 16;
+  function tick() {
+    const p = Math.min(1, (performance.now() - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    node.textContent = formatFn(value * eased);
+    if (p < 1) setTimeout(tick, step);
+    else node.textContent = formatFn(value);
+  }
+  tick();
+}
+
+// A short confetti burst to celebrate a win (e.g. logging a sale).
+export function celebrate() {
+  if (prefersReducedMotion()) return;
+  const colors = ['#6d5efc', '#9b8dff', '#22d99a', '#ffb341', '#3fb6f0', '#ff5470'];
+  const pieces = [];
+  for (let i = 0; i < 26; i++) {
+    const dx = (Math.random() - 0.5) * 340;
+    const dy = 180 + Math.random() * 240;
+    const rot = (Math.random() - 0.5) * 720;
+    const p = el('div', { class: 'confetti-piece' });
+    p.style.background = colors[i % colors.length];
+    p.style.left = (42 + Math.random() * 16) + '%';
+    p.style.setProperty('--dx', dx.toFixed(0) + 'px');
+    p.style.setProperty('--dy', dy.toFixed(0) + 'px');
+    p.style.setProperty('--rot', rot.toFixed(0) + 'deg');
+    p.style.animationDelay = (Math.random() * 0.15).toFixed(2) + 's';
+    document.body.append(p);
+    pieces.push(p);
+  }
+  setTimeout(() => pieces.forEach(p => p.remove()), 1500);
+}
+
+// ── Tap ripple ────────────────────────────────────────────────────────────────
+// A single delegated pointerdown listener spawns a ripple on any matching
+// element. Runs once, at module load, since ui.js is a singleton import.
+const RIPPLE_SELECTOR = '.btn, .card.item, .home-card, .segment, .product-card, ' +
+  '.cal-day.has-sales, .fab, #back-btn, #logout-btn, .link';
+
+function initRipples() {
+  document.addEventListener('pointerdown', e => {
+    if (prefersReducedMotion()) return;
+    const target = e.target.closest(RIPPLE_SELECTOR);
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const size = Math.max(rect.width, rect.height) * 1.3;
+    const span = el('span', { class: 'ripple-el' });
+    span.style.width = span.style.height = size + 'px';
+    span.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    span.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    const cs = getComputedStyle(target);
+    if (cs.position === 'static') target.style.position = 'relative';
+    if (cs.overflow === 'visible') target.style.overflow = 'hidden';
+    target.appendChild(span);
+    span.addEventListener('animationend', () => span.remove(), { once: true });
+    setTimeout(() => span.remove(), 700);
+  }, { passive: true });
+}
+initRipples();
+
 // A segmented control: options = [{value,label}]. Calls onChange(value) when a
-// different segment is tapped. Returns the container node.
+// different segment is tapped. Returns the container node. The active segment
+// is highlighted by a sliding indicator pill that animates between positions.
 export function segmented(options, active, onChange) {
   const wrap = el('div', { class: 'segmented' });
-  for (const o of options) {
-    wrap.append(el('button', {
+  const indicator = el('div', { class: 'segment-indicator' });
+  wrap.append(indicator);
+  const buttons = options.map(o => {
+    const btn = el('button', {
       type: 'button',
       class: 'segment' + (o.value === active ? ' active' : ''),
       onClick: () => { if (o.value !== active) onChange(o.value); }
-    }, o.label));
-  }
+    }, o.label);
+    wrap.append(btn);
+    return btn;
+  });
+  const activeBtn = buttons[Math.max(0, options.findIndex(o => o.value === active))];
+  // Deferred (not requestAnimationFrame, which is suspended on a backgrounded/
+  // not-yet-painted tab) so `wrap` is guaranteed attached to the live DOM by the
+  // caller before we measure offsetWidth/offsetLeft (both read as 0 while detached).
+  setTimeout(() => {
+    if (!activeBtn) return;
+    indicator.style.width = activeBtn.offsetWidth + 'px';
+    indicator.style.transform = `translateX(${activeBtn.offsetLeft}px)`;
+  }, 0);
   return wrap;
 }

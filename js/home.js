@@ -1,7 +1,7 @@
 // Home launcher: the landing screen with one card per section. Tapping a card
 // hands control back to app.js via onSelect(key), which drills into that section.
 import { sb } from './supabase.js';
-import { el, money, num, todayISO } from './ui.js';
+import { el, money, num, todayISO, staggerChildren } from './ui.js';
 
 const SECTIONS = [
   { key: 'resell', icon: '📦', name: 'Reselling', sub: 'Inventory, sales & profit' },
@@ -15,6 +15,7 @@ export async function renderHome(root, onSelect) {
 
   const cardsWrap = el('div', { class: 'home-cards' });
   for (const s of SECTIONS) cardsWrap.append(homeCard(s, onSelect));
+  staggerChildren(cardsWrap);
   root.append(cardsWrap);
 
   // Fill in a live one-line stat per card, best-effort (leave the default subtitle on failure).

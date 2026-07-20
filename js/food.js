@@ -2,7 +2,8 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, num, fmtDate, todayISO, shiftDate, toast, formModal, confirmModal, actionSheet, emptyState
+  el, num, fmtDate, todayISO, shiftDate, toast, formModal, confirmModal, actionSheet, emptyState,
+  skeleton, staggerChildren, countUp
 } from './ui.js';
 import { lineChart, chartCard } from './charts.js';
 
@@ -35,7 +36,7 @@ async function loadCalorieTrend(days) {
 
 export async function renderFood(root) {
   root.innerHTML = '';
-  root.append(el('p', { class: 'muted' }, 'Loading…'));
+  root.append(skeleton(1, 'block'), skeleton(4, 'item'));
   let data;
   try {
     data = await loadData(selectedDate);
@@ -65,15 +66,17 @@ export async function renderFood(root) {
     c: a.c + (+l.carbs || 0), f: a.f + (+l.fat || 0)
   }), { cal: 0, p: 0, c: 0, f: 0 });
 
+  const calEl = el('div', { style: 'font-size:28px;font-weight:800' });
   root.append(el('div', { class: 'card', style: 'padding:18px;margin-bottom:18px' }, [
     el('div', { style: 'display:flex;align-items:baseline;justify-content:space-between' }, [
       el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Calories'),
-      el('div', { style: 'font-size:28px;font-weight:800' }, num(t.cal))
+      calEl
     ]),
     el('div', { class: 'row', style: 'margin-top:14px' }, [
       macro('Protein', t.p), macro('Carbs', t.c), macro('Fat', t.f)
     ])
   ]));
+  countUp(calEl, t.cal, num);
 
   // Logged foods
   root.append(el('div', { class: 'section-head' }, [
@@ -83,7 +86,9 @@ export async function renderFood(root) {
   if (!logs.length) {
     root.append(emptyState('🍽️', 'Nothing logged. Tap + to add food.'));
   } else {
-    root.append(el('div', { class: 'list' }, logs.map(l => logRow(l, root))));
+    const logList = el('div', { class: 'list' }, logs.map(l => logRow(l, root)));
+    staggerChildren(logList);
+    root.append(logList);
   }
 
   // ── Insights: calorie trend (last 14 days) ──
