@@ -3,50 +3,34 @@
 // workout templates (a friend can copy one of your shared templates to
 // their own planner). No push notifications — this is a pull/refresh model,
 // consistent with the rest of the static-PWA architecture.
+//
+// Identity + friend-request plumbing (usernames, search, send/respond/remove)
+// lives in js/profile.js and is shared with the Reselling Goals tab — this
+// file only adds the Fitness-specific views (leaderboard, friend detail).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, toast, formModal, confirmModal, emptyState,
   skeleton, staggerChildren, openModal, closeModal
 } from './ui.js';
+import {
+  loadOwnProfile, claimUsername, updateProfile, searchProfiles,
+  loadFriendships, otherIdOf, sendFriendRequest, respondFriendRequest, removeFriendship
+} from './profile.js';
 
 let friendsView = 'friends'; // 'friends' | 'requests' | 'leaderboard' | 'add'
 
-const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
-
-async function loadOwnProfile() {
-  const { data, error } = await sb.from('profiles').select('*').eq('user_id', getUid()).maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
 async function loadSocialData() {
-  const uid = getUid();
-  const { data: rows, error } = await sb.from('friendships')
-    .select('*').or(`requester_id.eq.${uid},addressee_id.eq.${uid}`);
-  if (error) throw error;
+  const { accepted, incoming, outgoing, profileById } = await loadFriendships();
+  const otherIds = Object.keys(profileById);
 
-  const accepted = (rows || []).filter(r => r.status === 'accepted');
-  const incoming = (rows || []).filter(r => r.status === 'pending' && r.addressee_id === uid);
-  const outgoing = (rows || []).filter(r => r.status === 'pending' && r.requester_id === uid);
-
-  const otherIds = [...new Set([...accepted, ...incoming, ...outgoing]
-    .map(r => (r.requester_id === uid ? r.addressee_id : r.requester_id)))];
-
-  let profileById = {}, progressById = {};
+  let progressById = {};
   if (otherIds.length) {
-    const [{ data: profs }, { data: progs }] = await Promise.all([
-      sb.from('profiles').select('*').in('user_id', otherIds),
-      sb.from('fitness_progress').select('*').in('user_id', otherIds)
-    ]);
-    for (const p of (profs || [])) profileById[p.user_id] = p;
+    const { data: progs, error } = await sb.from('fitness_progress').select('*').in('user_id', otherIds);
+    if (error) throw error;
     for (const p of (progs || [])) progressById[p.user_id] = p;
   }
   return { accepted, incoming, outgoing, profileById, progressById };
-}
-
-function otherId(friendship, uid) {
-  return friendship.requester_id === uid ? friendship.addressee_id : friendship.requester_id;
 }
 
 export async function renderFriends(container, root) {
@@ -115,19 +99,9 @@ function usernameSetupCard(container, root) {
   const err = el('p', { class: 'form-error', hidden: true });
   const btn = el('button', { class: 'btn btn-primary btn-block', style: 'margin-top:12px' }, 'Claim username');
   btn.addEventListener('click', async () => {
-    const username = input.value.trim().toLowerCase();
-    if (!USERNAME_RE.test(username)) {
-      err.textContent = '3-20 characters: lowercase letters, numbers, underscore.';
-      err.hidden = false;
-      return;
-    }
     err.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const { error } = await sb.from('profiles').insert({ user_id: getUid(), username });
-      if (error) {
-        if (/duplicate|unique/i.test(error.message)) throw new Error('That username is taken.');
-        throw error;
-      }
+      await claimUsername(input.value);
       toast('Username set 👋', 'ok');
       renderFriends(container, root);
     } catch (ex) {
@@ -152,11 +126,7 @@ function editProfileForm(profile, container, root) {
     ],
     submitText: 'Save',
     onSubmit: async v => {
-      const username = (v.username || '').trim().toLowerCase();
-      if (!USERNAME_RE.test(username)) throw new Error('3-20 characters: lowercase letters, numbers, underscore.');
-      const { error } = await sb.from('profiles')
-        .update({ username, display_name: v.display_name || null }).eq('user_id', getUid());
-      if (error) throw error.message?.match(/duplicate|unique/i) ? new Error('That username is taken.') : error;
+      await updateProfile(v.username, v.display_name);
       toast('Saved', 'ok');
       renderFriends(container, root);
     }
@@ -176,7 +146,7 @@ function renderFriendsList(body, data, container, root) {
   }
   const list = el('div', { class: 'list' }, data.accepted.map(f => {
     const uid = getUid();
-    const oid = otherId(f, uid);
+    const oid = otherIdOf(f, uid);
     const prof = data.profileById[oid];
     const prog = data.progressById[oid];
     return el('div', { class: 'card item', onClick: () => openFriendDetail(oid, prof, prog, container, root) }, [
@@ -229,15 +199,8 @@ function renderRequests(body, data, container, root) {
 
 async function respondRequest(f, accept, container, root) {
   try {
-    if (accept) {
-      const { error } = await sb.from('friendships').update({ status: 'accepted' }).eq('id', f.id);
-      if (error) throw error;
-      toast('Friend added 🤝', 'ok');
-    } else {
-      const { error } = await sb.from('friendships').delete().eq('id', f.id);
-      if (error) throw error;
-      toast('Declined');
-    }
+    await respondFriendRequest(f.id, accept);
+    toast(accept ? 'Friend added 🤝' : 'Declined', accept ? 'ok' : '');
     renderFriends(container, root);
   } catch (ex) {
     toast(ex.message || 'Failed', 'err');
@@ -248,8 +211,7 @@ function cancelRequest(f, container, root) {
   confirmModal({
     title: 'Cancel request?', confirmText: 'Cancel request',
     onConfirm: async () => {
-      const { error } = await sb.from('friendships').delete().eq('id', f.id);
-      if (error) throw error;
+      await respondFriendRequest(f.id, false);
       renderFriends(container, root);
     }
   });
@@ -261,7 +223,7 @@ function renderLeaderboard(body, data) {
   // fetch it lazily below since the leaderboard is the only place that needs it.
   const rows = [
     ...data.accepted.map(f => {
-      const oid = otherId(f, uid);
+      const oid = otherIdOf(f, uid);
       return { id: oid, label: '@' + (data.profileById[oid]?.username || 'unknown'), prog: data.progressById[oid] };
     })
   ];
@@ -307,9 +269,9 @@ function rankAndRender(rows, body) {
 function renderAddFriend(body, data, container, root) {
   const uid = getUid();
   const knownIds = new Set([
-    ...data.accepted.map(f => otherId(f, uid)),
-    ...data.incoming.map(f => otherId(f, uid)),
-    ...data.outgoing.map(f => otherId(f, uid))
+    ...data.accepted.map(f => otherIdOf(f, uid)),
+    ...data.incoming.map(f => otherIdOf(f, uid)),
+    ...data.outgoing.map(f => otherIdOf(f, uid))
   ]);
   const input = el('input', { placeholder: 'Search username…', style: 'margin-top:0' });
   const results = el('div', { class: 'list', style: 'margin-top:12px' });
@@ -320,11 +282,16 @@ function renderAddFriend(body, data, container, root) {
     const term = input.value.trim().toLowerCase();
     if (term.length < 2) { results.innerHTML = ''; return; }
     timer = setTimeout(async () => {
-      const { data: matches, error } = await sb.from('profiles')
-        .select('*').ilike('username', `%${term}%`).neq('user_id', uid).limit(10);
+      let matches;
+      try {
+        matches = await searchProfiles(term);
+      } catch (ex) {
+        results.innerHTML = '';
+        results.append(emptyState('⚠️', ex.message));
+        return;
+      }
       results.innerHTML = '';
-      if (error) { results.append(emptyState('⚠️', error.message)); return; }
-      if (!matches?.length) { results.append(emptyState('🔍', 'No users found.')); return; }
+      if (!matches.length) { results.append(emptyState('🔍', 'No users found.')); return; }
       results.append(...matches.map(m => {
         const already = knownIds.has(m.user_id);
         return el('div', { class: 'card item' }, [
@@ -337,8 +304,7 @@ function renderAddFriend(body, data, container, root) {
                 onClick: async e => {
                   e.target.disabled = true; e.target.textContent = 'Sending…';
                   try {
-                    const { error } = await sb.from('friendships').insert({ requester_id: uid, addressee_id: m.user_id });
-                    if (error) throw error;
+                    await sendFriendRequest(m.user_id);
                     toast('Request sent', 'ok');
                     friendsView = 'requests';
                     renderFriends(container, root);
@@ -415,10 +381,7 @@ function removeFriend(oid, container, root) {
   confirmModal({
     title: 'Remove friend?', confirmText: 'Remove',
     onConfirm: async () => {
-      const uid = getUid();
-      const { error } = await sb.from('friendships').delete()
-        .or(`and(requester_id.eq.${uid},addressee_id.eq.${oid}),and(requester_id.eq.${oid},addressee_id.eq.${uid})`);
-      if (error) throw error;
+      await removeFriendship(oid);
       closeModal();
       toast('Removed');
       renderFriends(container, root);

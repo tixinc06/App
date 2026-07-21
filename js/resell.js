@@ -10,6 +10,7 @@ import {
 import { lineChart, barChart, chartCard } from './charts.js';
 import { plCalendar } from './calendar.js';
 import { renderProducts } from './products.js';
+import { renderGoals, loadTopBarGoal } from './resellgoals.js';
 
 const BUCKET = 'resell-photos';
 const STALE_DAYS = 60;
@@ -91,7 +92,8 @@ export async function renderResell(root) {
     { value: 'overview', label: 'Overview' },
     { value: 'inventory', label: 'Inventory' },
     { value: 'products', label: 'Products' },
-    { value: 'insights', label: 'Insights' }
+    { value: 'insights', label: 'Insights' },
+    { value: 'goals', label: 'Goals' }
   ], segment, v => { segment = v; renderResell(root); }));
 
   const body = el('div');
@@ -99,6 +101,11 @@ export async function renderResell(root) {
 
   if (segment === 'products') {
     renderProducts(body, product => addItemFromProduct(product, root));
+    return;
+  }
+
+  if (segment === 'goals') {
+    renderGoals(body, root);
     return;
   }
 
@@ -138,6 +145,25 @@ function renderOverview(body, data, root) {
   const thisMonthTotal = Object.entries(ledger)
     .filter(([d]) => d.slice(0, 7) === thisMonthPrefix)
     .reduce((a, [, day]) => a + day.amount, 0);
+
+  // Best-effort slim goal bar (only shown once a target is set) — never
+  // blocks the rest of Overview if it fails to load.
+  const goalBarWrap = el('div');
+  body.append(goalBarWrap);
+  loadTopBarGoal().then(g => {
+    if (!g) return;
+    const pct = g.target > 0 ? Math.min(1, Math.max(0, g.profit / g.target)) : 0;
+    goalBarWrap.append(el('div', {
+      class: 'card', style: 'padding:12px 16px;margin-bottom:14px;cursor:pointer',
+      onClick: () => { segment = 'goals'; renderResell(root); }
+    }, [
+      el('div', { style: 'display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px' }, [
+        el('span', { class: 'muted' }, 'Monthly goal'),
+        el('span', { style: 'font-weight:700' }, `${money(g.profit)} / ${money(g.target)}`)
+      ]),
+      el('div', { class: 'meter' }, [el('div', { class: 'meter-fill', style: `width:${(pct * 100).toFixed(1)}%` })])
+    ]));
+  }).catch(() => {});
 
   const netValEl = el('div', { class: 'v ' + (netPosition > 0 ? 'pos' : netPosition < 0 ? 'neg' : '') });
   body.append(el('div', { class: 'card net-card' }, [

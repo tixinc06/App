@@ -407,3 +407,73 @@ CREATE TABLE IF NOT EXISTS achievements (
 ALTER TABLE achievements ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own achievements" ON achievements
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Reselling: monthly profit goal calculator + duo goals ───────────────────
+CREATE TABLE IF NOT EXISTS resell_goals (
+  user_id              UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_profit        NUMERIC NOT NULL DEFAULT 0,
+  avg_sale_price        NUMERIC,
+  avg_profit_per_sale   NUMERIC,
+  updated_at           TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE resell_goals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own resell_goals" ON resell_goals
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE TABLE IF NOT EXISTS duo_goals (
+  id             UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  requester_id   UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  addressee_id   UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
+  target_profit  NUMERIC NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ DEFAULT now(),
+  CHECK (requester_id <> addressee_id)
+);
+ALTER TABLE duo_goals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "view own duo_goals" ON duo_goals
+  FOR SELECT USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
+CREATE POLICY "create duo_goals" ON duo_goals
+  FOR INSERT WITH CHECK (auth.uid() = requester_id);
+CREATE POLICY "respond duo_goals" ON duo_goals
+  FOR UPDATE USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
+CREATE POLICY "delete duo_goals" ON duo_goals
+  FOR DELETE USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
+CREATE INDEX IF NOT EXISTS idx_duo_goals_requester ON duo_goals (requester_id, status);
+CREATE INDEX IF NOT EXISTS idx_duo_goals_addressee ON duo_goals (addressee_id, status);
+
+CREATE OR REPLACE FUNCTION resell_month_profit(target_user UUID)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  total NUMERIC;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF auth.uid() <> target_user AND NOT EXISTS (
+    SELECT 1 FROM friendships f
+    WHERE f.status = 'accepted'
+      AND ((f.requester_id = auth.uid() AND f.addressee_id = target_user)
+        OR (f.addressee_id = auth.uid() AND f.requester_id = target_user))
+  ) THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT COALESCE(SUM(sale_price - fees - shipping_cost - cost_snapshot), 0)
+  INTO total
+  FROM resell_sales
+  WHERE user_id = target_user
+    AND returned = false
+    AND sold_date >= date_trunc('month', CURRENT_DATE)::date
+    AND sold_date < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')::date;
+
+  RETURN total;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION resell_month_profit(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION resell_month_profit(UUID) TO authenticated;

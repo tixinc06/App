@@ -100,6 +100,7 @@ textarea{resize:vertical; min-height:70px}
 .stat .k{font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
 .stat .v{font-size:24px; font-weight:800; margin-top:6px; letter-spacing:-.5px}
 .v.pos{color:var(--green)} .v.neg{color:var(--red)}
+.pos{color:var(--green)} .neg{color:var(--red)}
 
 .list{display:flex; flex-direction:column; gap:10px}
 .item{padding:14px 15px; display:flex; align-items:center; gap:13px; position:relative; overflow:hidden;

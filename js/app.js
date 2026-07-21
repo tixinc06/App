@@ -8,6 +8,7 @@ import { renderFitness } from './fitness.js';
 import { renderHome } from './home.js';
 import { loadAndApplyTheme } from './theme.js';
 import { el, toast } from './ui.js';
+import { loadOwnProfile, claimUsername } from './profile.js';
 
 const sections = {
   resell:  { title: 'Reselling', render: renderResell },
@@ -122,6 +123,62 @@ function wireGestures() {
   }, { passive: true });
 }
 
+// Username is an app-wide identity (Fitness + Reselling both use it), so it's
+// enforced once here rather than per-section. Consumes a username stashed at
+// signup (email-confirmation flow) if present; otherwise blocks on a manual
+// gate rendered into the view area, before Home ever mounts.
+async function ensureUsername() {
+  let profile;
+  try {
+    profile = await loadOwnProfile();
+  } catch {
+    return; // best-effort — a transient load error shouldn't hard-lock the app
+  }
+  if (profile) return;
+
+  const pending = localStorage.getItem('pendingUsername');
+  if (pending) {
+    try {
+      await claimUsername(pending);
+      localStorage.removeItem('pendingUsername');
+      return;
+    } catch {
+      localStorage.removeItem('pendingUsername'); // stale/taken — fall through to the manual gate
+    }
+  }
+  await usernameGateView();
+}
+
+function usernameGateView() {
+  return new Promise(resolve => {
+    const container = document.getElementById('view');
+    document.getElementById('view-title').textContent = 'Welcome';
+    container.innerHTML = '';
+
+    const input = el('input', { placeholder: 'e.g. jordan92', style: 'margin-top:0' });
+    const err = el('p', { class: 'form-error', hidden: true });
+    const btn = el('button', { class: 'btn btn-primary btn-block', style: 'margin-top:12px' }, 'Continue');
+    btn.addEventListener('click', async () => {
+      err.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        await claimUsername(input.value);
+        resolve();
+      } catch (ex) {
+        err.textContent = ex.message || 'Failed to save.';
+        err.hidden = false; btn.disabled = false; btn.textContent = 'Continue';
+      }
+    });
+
+    container.append(el('div', { class: 'card', style: 'padding:24px;margin-top:20px' }, [
+      el('div', { style: 'font-size:34px;text-align:center;margin-bottom:10px' }, '👋'),
+      el('div', { style: 'font-weight:700;font-size:18px;text-align:center;margin-bottom:6px' }, 'Pick a username'),
+      el('div', { class: 'muted', style: 'text-align:center;margin-bottom:16px' },
+        'Used across the whole app — friends will find you by this, in both Fitness and Reselling.'),
+      input, err, btn
+    ]));
+  });
+}
+
 async function main() {
   if (!IS_CONFIGURED) {
     showOnly('setup-notice');
@@ -131,9 +188,10 @@ async function main() {
   wireChrome();
   wireGestures();
 
-  await initSession(session => {
+  await initSession(async session => {
     if (session) {
       showOnly('app');
+      await ensureUsername();
       activeSection = null;
       renderActive('forward');
       loadAndApplyTheme();

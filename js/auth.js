@@ -1,6 +1,7 @@
 // Authentication + session state.
 // Owns the auth screen wiring, the current-user cache, and session init.
 import { sb } from './supabase.js';
+import { USERNAME_RE } from './profile.js';
 
 let _user = null;
 export const getUser = () => _user;
@@ -26,6 +27,8 @@ export function logout() {
 export function wireAuthScreen() {
   const form = document.getElementById('auth-form');
   const email = document.getElementById('auth-email');
+  const usernameLabel = document.getElementById('auth-username-label');
+  const username = document.getElementById('auth-username');
   const pass = document.getElementById('auth-password');
   const err = document.getElementById('auth-error');
   const submit = document.getElementById('auth-submit');
@@ -39,6 +42,8 @@ export function wireAuthScreen() {
     toggleText.textContent = m === 'login' ? 'New here?' : 'Already have an account?';
     toggleBtn.textContent = m === 'login' ? 'Create an account' : 'Log in';
     pass.setAttribute('autocomplete', m === 'login' ? 'current-password' : 'new-password');
+    usernameLabel.hidden = m !== 'signup';
+    username.required = m === 'signup';
     err.hidden = true;
   }
   function showMsg(text, ok = false) {
@@ -58,10 +63,23 @@ export function wireAuthScreen() {
     const creds = { email: email.value.trim(), password: pass.value };
     try {
       if (mode === 'signup') {
+        const desiredUsername = username.value.trim().toLowerCase();
+        if (!USERNAME_RE.test(desiredUsername)) {
+          throw new Error('Username must be 3-20 characters: lowercase letters, numbers, underscore.');
+        }
         const { data, error } = await sb.auth.signUp(creds);
         if (error) throw error;
-        // If email confirmation is on, there's no session yet.
+        // Always stash the desired username rather than claiming it here —
+        // signUp() also fires app.js's onAuthStateChange-triggered username
+        // gate independently, and having BOTH this code and that gate try to
+        // insert the profile row would be a race (whichever loses sees a
+        // confusing "taken" error for a username that's already theirs). The
+        // gate is the single place that ever creates the row; it consumes
+        // this value automatically, with no visible prompt, whenever a
+        // session is already available.
+        localStorage.setItem('pendingUsername', desiredUsername);
         if (!data.session) {
+          // Email confirmation is on — no session yet.
           setMode('login');
           showMsg('Account created! Check your email to confirm, then log in.', true);
         }

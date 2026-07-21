@@ -3,7 +3,7 @@
 // Strategy: network-first for ALL same-origin requests (so code edits/deploys
 // always land when online), falling back to the cache only when offline. This
 // avoids stale-JavaScript bugs after a deploy.
-const CACHE = 'tracker-v11';
+const CACHE = 'tracker-v12';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/styles.css',
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/gamedata.js', './js/progression.js', './js/progress.js',
   './js/standards.js', './js/ranks.js', './js/shop.js', './js/theme.js', './js/social.js',
   './js/streaks.js', './js/quests.js', './js/achievements.js',
+  './js/profile.js', './js/resellgoals.js',
   './icons/icon.svg'
 ];
 
