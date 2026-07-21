@@ -16,6 +16,19 @@ export async function loadProgress() {
   return ins.data;
 }
 
+// Returns the cooldown expiry Date if XP/Plates are currently blocked, else
+// null. Callers that persist a one-time side effect on award (quest claims,
+// achievement unlocks) MUST check this BEFORE persisting anything — award()
+// itself refuses to grant XP during cooldown, so persisting first would burn
+// the one-time claim/unlock with no reward.
+export async function isOnCooldown() {
+  const progress = await loadProgress();
+  if (progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date()) {
+    return new Date(progress.xp_cooldown_until);
+  }
+  return null;
+}
+
 export function xpToNext(progress) {
   return progress.is_master ? GD.xpForMasterLevel(progress.level) : GD.xpForLevel(progress.level);
 }
@@ -49,6 +62,9 @@ async function rollLevels(progress) {
 // Returns null if there was nothing to award (empty/unrecognised events).
 export async function award(events) {
   const progress = await loadProgress();
+  if (progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date()) {
+    return { onCooldown: true, until: progress.xp_cooldown_until };
+  }
   let xpGain = 0, platesGain = 0;
   const labels = [];
   for (const e of events) {
@@ -85,11 +101,19 @@ export async function award(events) {
     }
   } catch { /* no booster available */ }
 
-  const { data, error } = await sb.from('fitness_progress').update({
+  const updatePayload = {
     xp: Number(progress.xp) + xpGain,
     plates: Number(progress.plates) + platesGain,
     lifetime_xp: Number(progress.lifetime_xp) + xpGain
-  }).eq('user_id', progress.user_id).select().single();
+  };
+  // Only a workout event (re)sets the cooldown — claiming a quest or
+  // unlocking an achievement on its own doesn't extend it.
+  if (events.some(e => e.type === 'workout')) {
+    updatePayload.xp_cooldown_until = new Date(Date.now() + 10 * 3600 * 1000).toISOString();
+  }
+
+  const { data, error } = await sb.from('fitness_progress').update(updatePayload)
+    .eq('user_id', progress.user_id).select().single();
   if (error) throw error;
 
   const rolled = await rollLevels(data);

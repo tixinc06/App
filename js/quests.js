@@ -6,7 +6,7 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { todayISO, isoOf } from './ui.js';
 import { QUESTS } from './gamedata.js';
-import { award } from './progression.js';
+import { award, isOnCooldown } from './progression.js';
 
 function weekStartOf(iso) {
   const d = new Date(iso + 'T00:00:00');
@@ -47,6 +47,15 @@ export async function loadQuestProgress(workouts, prs, goals) {
 }
 
 export async function claimQuest(quest, weekStart) {
+  // Checked BEFORE inserting the claim row — claiming while on cooldown
+  // would otherwise burn the one-time claim for zero reward, since award()
+  // itself refuses to grant XP during cooldown.
+  const cooldown = await isOnCooldown();
+  if (cooldown) {
+    const mins = Math.max(1, Math.round((cooldown - new Date()) / 60000));
+    throw new Error(`On cooldown — try again in ${Math.floor(mins / 60)}h ${mins % 60}m.`);
+  }
+
   const uid = getUid();
   const { error } = await sb.from('quest_claims')
     .insert({ user_id: uid, quest_code: quest.code, period_key: weekStart });

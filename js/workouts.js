@@ -8,6 +8,7 @@ import {
   el, toast, formModal, confirmModal, actionSheet, emptyState, skeleton, closeModal, openModal
 } from './ui.js';
 import { workoutBuilder } from './fitness.js';
+import { attachExercisePicker } from './exercises.js';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -187,6 +188,7 @@ function templateEditorModal(container, root, existing) {
 
   function addRow(name = '', sets = 3, reps = 10) {
     const nameInput = el('input', { placeholder: 'Exercise name', value: name, style: 'margin-top:0' });
+    attachExercisePicker(nameInput);
     const setsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', placeholder: 'sets', value: sets, style: 'margin-top:0' });
     const repsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
     const rowObj = { nameInput, setsInput, repsInput };

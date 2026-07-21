@@ -13,9 +13,11 @@ import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
 import { renderFriends } from './social.js';
-import { detectAndSavePRs, checkGoals, award, loadProgress } from './progression.js';
+import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown } from './progression.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
+import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
+import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
 
@@ -251,19 +253,48 @@ function weightActions(w, root) {
 // set rows) per template exercise, ready for the user to fill in real weights.
 export function workoutBuilder(root, prefill) {
   const exWrap = el('div');
-  const state = []; // [{ nameInput, sets: [{weightInput, repsInput}] , node }]
+  const state = []; // [{ nameInput, sets: [{weightInput, repsInput, ticked}] , node }]
+  let restSeconds = loadLastDuration();
+  const startedAt = Date.now();
 
   function addExercise(initialName = '', initialSets = 1) {
     const setsWrap = el('div', { style: 'margin:8px 0 0' });
     const sets = [];
     const nameInput = el('input', { placeholder: 'Exercise name', value: initialName, style: 'margin-top:0' });
+    const nameWrap = el('div', { style: 'flex:1;min-width:0' }, [nameInput]);
+    attachExercisePicker(nameInput);
+
+    const hintEl = el('div', { class: 'dim', style: 'font-size:12px;margin-top:6px', hidden: true });
+    let hintTimer = null;
+    function refreshHint() {
+      clearTimeout(hintTimer);
+      const name = nameInput.value.trim();
+      if (!name) { hintEl.hidden = true; return; }
+      hintTimer = setTimeout(async () => {
+        const prev = await loadPreviousPerformance(name);
+        if (!prev) { hintEl.hidden = true; return; }
+        hintEl.textContent = `Last time (${fmtDate(prev.date)}): ` +
+          prev.sets.map(s => `${num(s.weight)}×${num(s.reps)}`).join(', ');
+        hintEl.hidden = false;
+      }, 450);
+    }
+    nameInput.addEventListener('input', refreshHint);
+    if (initialName) refreshHint();
 
     function addSet(weight = '', reps = '') {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
-      const rowObj = { weightInput: wI, repsInput: rI };
+      const rowObj = { weightInput: wI, repsInput: rI, ticked: false };
+      const tickBtn = el('button', {
+        type: 'button', class: 'set-tick', title: 'Mark set done (starts rest timer)',
+        onClick: () => {
+          rowObj.ticked = !rowObj.ticked;
+          tickBtn.classList.toggle('ticked', rowObj.ticked);
+          if (rowObj.ticked) startRestTimer(restSeconds);
+        }
+      }, '✓');
       const row = el('div', { class: 'row', style: 'margin-bottom:8px;align-items:center' }, [
-        wI, rI,
+        tickBtn, wI, rI,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
           onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); }
@@ -277,12 +308,13 @@ export function workoutBuilder(root, prefill) {
     const exObj = { nameInput, sets };
     const node = el('div', { class: 'card', style: 'padding:14px;margin-bottom:12px' }, [
       el('div', { class: 'row', style: 'align-items:center' }, [
-        nameInput,
+        nameWrap,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-danger', style: 'flex:0 0 auto',
           onClick: () => { const i = state.indexOf(exObj); if (i > -1) state.splice(i, 1); node.remove(); }
         }, '🗑')
       ]),
+      hintEl,
       setsWrap,
       el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => addSet() }, '＋ Add set')
     ]);
@@ -301,6 +333,13 @@ export function workoutBuilder(root, prefill) {
   const notesInput = el('textarea', { placeholder: 'Notes (optional)' });
   const err = el('p', { class: 'form-error', hidden: true });
   const saveBtn = el('button', { class: 'btn btn-primary btn-block' }, 'Save workout');
+
+  const durationEl = el('span', { class: 'dim', style: 'font-size:12px' }, '0:00 elapsed');
+  const durationTimer = setInterval(() => {
+    if (!document.body.contains(durationEl)) { clearInterval(durationTimer); return; }
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    durationEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} elapsed`;
+  }, 1000);
 
   saveBtn.addEventListener('click', async () => {
     const exercises = state
@@ -324,17 +363,29 @@ export function workoutBuilder(root, prefill) {
       if (error) throw error;
       closeModal();
 
-      // Progression is best-effort: PR/goal detection and XP/Plate awards
-      // should never block the workout save itself if something goes wrong.
-      let gains = null;
+      // The whole progression pipeline (PR/goal detection, achievement
+      // unlocks, XP/Plate award) is skipped entirely while on cooldown —
+      // not just the award() call. Detecting a PR or completing a goal
+      // would otherwise mark it permanently (personal_records upsert,
+      // fitness_goals.achieved, achievements table) with no XP ever paid
+      // out for it, since award() refuses to grant XP during cooldown.
+      // Skipping everything defers detection cleanly to the next
+      // non-cooldown save — zero data loss, no burned rewards.
+      let gains = null, cooldownUntil = null;
       try {
-        const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
-        const prEvents = await detectAndSavePRs(exercises);
-        const goalEvents = await checkGoals();
-        gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
+        cooldownUntil = await isOnCooldown();
+        if (!cooldownUntil) {
+          const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
+          const prEvents = await detectAndSavePRs(exercises);
+          const goalEvents = await checkGoals();
+          gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
+        }
       } catch { /* progression failure shouldn't hide that the workout saved */ }
 
-      if (gains) {
+      if (cooldownUntil) {
+        const mins = Math.max(1, Math.round((cooldownUntil - new Date()) / 60000));
+        toast(`Workout saved 💪 · On cooldown — ${Math.floor(mins / 60)}h ${mins % 60}m left`, 'ok');
+      } else if (gains) {
         const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
         if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
         if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
@@ -344,21 +395,23 @@ export function workoutBuilder(root, prefill) {
         toast('Workout saved 💪', 'ok');
       }
 
-      // Achievement check is separate + best-effort: it must never block the
-      // workout save, and it needs true lifetime totals (not just this save).
-      try {
-        const prog = gains?.progress || await loadProgress();
-        const { data: wRows } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
-        const streak = await computeStreak(wRows || []);
-        const stats = await loadStats(prog, streak.current);
-        const achEvents = await checkAchievements(stats);
-        if (achEvents.length) {
-          const achGains = await award(achEvents);
-          for (const a of achEvents) toast(`🏆 ${a.label} unlocked! +${a.xp} XP · +${a.plates} Plates`, 'ok');
-          celebrate();
-          if (achGains?.levelsGained > 0) toast(achGains.levelsGained > 1 ? `Level up ×${achGains.levelsGained}!` : 'Level up!', 'ok');
-        }
-      } catch { /* best-effort — achievements can catch up on the next save */ }
+      // Achievement check is separate + best-effort, and also fully skipped
+      // during cooldown (see above) — it must never block the workout save.
+      if (!cooldownUntil) {
+        try {
+          const prog = gains?.progress || await loadProgress();
+          const { data: wRows } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
+          const streak = await computeStreak(wRows || []);
+          const stats = await loadStats(prog, streak.current);
+          const achEvents = await checkAchievements(stats);
+          if (achEvents.length) {
+            const achGains = await award(achEvents);
+            for (const a of achEvents) toast(`🏆 ${a.label} unlocked! +${a.xp} XP · +${a.plates} Plates`, 'ok');
+            celebrate();
+            if (achGains?.levelsGained > 0) toast(achGains.levelsGained > 1 ? `Level up ×${achGains.levelsGained}!` : 'Level up!', 'ok');
+          }
+        } catch { /* best-effort — achievements can catch up on the next save */ }
+      }
 
       renderFitness(root);
     } catch (ex) {
@@ -368,10 +421,15 @@ export function workoutBuilder(root, prefill) {
   });
 
   openModal(el('div', {}, [
-    el('h3', {}, prefill?.name ? 'Start: ' + prefill.name : 'Log workout'),
+    el('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:2px' }, [
+      el('h3', {}, prefill?.name ? 'Start: ' + prefill.name : 'Log workout'),
+      durationEl
+    ]),
     el('label', {}, ['Date', dateInput]),
     el('label', {}, ['Workout name', nameInput]),
-    el('div', { class: 'section-head', style: 'margin:6px 2px 10px' }, [el('h2', {}, 'Exercises')]),
+    el('div', { class: 'section-head', style: 'margin:10px 2px 2px' }, [el('h2', {}, 'Rest timer')]),
+    durationPickerEl(restSeconds, v => { restSeconds = v; }),
+    el('div', { class: 'section-head', style: 'margin:10px 2px 10px' }, [el('h2', {}, 'Exercises')]),
     exWrap,
     el('button', { type: 'button', class: 'btn btn-ghost btn-block', style: 'margin-bottom:14px', onClick: () => addExercise() }, '＋ Add exercise'),
     el('label', {}, ['Notes', notesInput]),

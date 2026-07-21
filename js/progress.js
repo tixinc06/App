@@ -60,11 +60,13 @@ export async function renderProgress(container, root) {
   }
   container.innerHTML = '';
 
+  const onCooldown = !!(progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date());
+
   container.append(levelCard(progress, bannerGradient, container, root));
   container.append(streakCard(streak));
 
   container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weekly quests')]));
-  const questList = el('div', { class: 'list', style: 'margin-bottom:22px' }, questsView.quests.map(q => questRow(q, questsView.weekStart, container, root)));
+  const questList = el('div', { class: 'list', style: 'margin-bottom:22px' }, questsView.quests.map(q => questRow(q, questsView.weekStart, onCooldown, container, root)));
   staggerChildren(questList);
   container.append(questList);
 
@@ -121,12 +123,14 @@ function streakCard(streak) {
   ]);
 }
 
-function questRow(q, weekStart, container, root) {
+function questRow(q, weekStart, onCooldown, container, root) {
   const pct = q.target ? Math.min(100, (q.progress / q.target) * 100) : 0;
   const status = q.claimed
     ? el('span', { class: 'pill' }, 'Claimed')
     : q.completed
-      ? el('button', { class: 'btn btn-sm btn-primary', onClick: () => doClaimQuest(q, weekStart, container, root) }, `Claim`)
+      ? (onCooldown
+          ? el('span', { class: 'pill' }, '⏳ Cooldown')
+          : el('button', { class: 'btn btn-sm btn-primary', onClick: () => doClaimQuest(q, weekStart, container, root) }, `Claim`))
       : el('span', { class: 'dim', style: 'font-size:12px' }, `${q.progress}/${q.target}`);
   return el('div', { class: 'card item' }, [
     el('div', { class: 'thumb' }, q.icon),

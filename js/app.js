@@ -9,6 +9,7 @@ import { renderHome } from './home.js';
 import { loadAndApplyTheme } from './theme.js';
 import { el, toast } from './ui.js';
 import { loadOwnProfile, claimUsername } from './profile.js';
+import { mountRestTimer } from './resttimer.js';
 
 const sections = {
   resell:  { title: 'Reselling', render: renderResell },
@@ -195,6 +196,7 @@ async function main() {
       activeSection = null;
       renderActive('forward');
       loadAndApplyTheme();
+      mountRestTimer();
     } else {
       showOnly('auth-screen');
     }
