@@ -111,6 +111,7 @@ textarea{resize:vertical; min-height:70px}
 .item .title{font-weight:700; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .item .sub{font-size:13px; color:var(--muted); margin-top:2px}
 .item .amt{font-weight:800; font-size:15px; text-align:right; white-space:nowrap}
+.card.item.active{outline:2px solid var(--primary); outline-offset:-2px; background:rgba(var(--primary-rgb),.08)}
 
 .pill{display:inline-block; font-size:11px; font-weight:700; padding:3px 8px; border-radius:99px;
   text-transform:uppercase; letter-spacing:.04em}

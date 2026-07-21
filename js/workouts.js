@@ -75,10 +75,15 @@ const PRESETS = [
   }
 ];
 
+// Explicit user_id filters below are load-bearing, not redundant: since Phase
+// FG-5 added a friends-visibility RLS policy to workout_templates (so a friend
+// can see your shared plans), an unfiltered select here would also return
+// templates friends have shared with YOU, mixing them into your own planner.
 async function loadPlanner() {
+  const uid = getUid();
   const [templates, splits] = await Promise.all([
-    sb.from('workout_templates').select('*').order('created_at', { ascending: false }),
-    sb.from('splits').select('*').order('created_at', { ascending: false })
+    sb.from('workout_templates').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+    sb.from('splits').select('*').eq('user_id', uid).order('created_at', { ascending: false })
   ]);
   if (templates.error) throw templates.error;
   if (splits.error) throw splits.error;
@@ -160,8 +165,20 @@ function templateActions(t, container, root) {
   actionSheet(t.name, [
     { label: '▶ Start workout', primary: true, onClick: () => workoutBuilder(root, { name: t.name, exercises: t.exercises }) },
     { label: '✏️ Edit', onClick: () => templateEditorModal(container, root, t) },
+    { label: t.is_shared ? '🔒 Unshare with friends' : '🔗 Share with friends', onClick: () => toggleShare(t, container, root) },
     { label: '🗑️ Delete', danger: true, onClick: () => deleteTemplate(t, container, root) }
   ]);
+}
+
+async function toggleShare(t, container, root) {
+  try {
+    const { error } = await sb.from('workout_templates').update({ is_shared: !t.is_shared }).eq('id', t.id);
+    if (error) throw error;
+    toast(t.is_shared ? 'Unshared' : 'Shared with friends 🔗', 'ok');
+    renderTrain(container, root);
+  } catch (ex) {
+    toast(ex.message || 'Failed to update sharing', 'err');
+  }
 }
 
 function templateEditorModal(container, root, existing) {

@@ -12,13 +12,10 @@ import { renderTrain } from './workouts.js';
 import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
+import { renderFriends } from './social.js';
 import { detectAndSavePRs, checkGoals, award } from './progression.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
-
-const COMING_SOON = {
-  friends: 'Friends — add, share plans & compare'
-};
 
 export async function renderFitness(root) {
   root.innerHTML = '';
@@ -48,12 +45,8 @@ export async function renderFitness(root) {
     return;
   }
 
-  if (fitSegment !== 'train') {
-    body.append(el('div', { class: 'card', style: 'padding:32px 20px;text-align:center' }, [
-      el('div', { style: 'font-size:34px;margin-bottom:10px' }, '🚧'),
-      el('div', { style: 'font-weight:700;margin-bottom:6px' }, 'Coming soon'),
-      el('div', { class: 'muted' }, COMING_SOON[fitSegment] || '')
-    ]));
+  if (fitSegment === 'friends') {
+    await renderFriends(body, root);
     return;
   }
 
