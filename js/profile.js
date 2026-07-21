@@ -31,16 +31,14 @@ export async function claimUsername(rawUsername, { uid, displayName } = {}) {
   return username;
 }
 
-export async function updateProfile(rawUsername, displayName) {
-  const username = (rawUsername || '').trim().toLowerCase();
-  if (!USERNAME_RE.test(username)) throw new Error('3-20 characters: lowercase letters, numbers, underscore.');
+// Usernames are permanent (chosen once at signup/first-login, enforced by a
+// DB trigger — see migration-username-lock.sql) — this only ever touches
+// display_name. There is deliberately no updateUsername/renameUsername
+// export; nothing in the app can change a username after claimUsername().
+export async function updateDisplayName(displayName) {
   const { error } = await sb.from('profiles')
-    .update({ username, display_name: displayName || null }).eq('user_id', getUid());
-  if (error) {
-    if (/duplicate|unique/i.test(error.message)) throw new Error('That username is taken.');
-    throw error;
-  }
-  return username;
+    .update({ display_name: (displayName || '').trim() || null }).eq('user_id', getUid());
+  if (error) throw error;
 }
 
 export async function searchProfiles(term, limit = 10) {

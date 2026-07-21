@@ -3,7 +3,7 @@
 // Strategy: network-first for ALL same-origin requests (so code edits/deploys
 // always land when online), falling back to the cache only when offline. This
 // avoids stale-JavaScript bugs after a deploy.
-const CACHE = 'tracker-v13';
+const CACHE = 'tracker-v14';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/styles.css',

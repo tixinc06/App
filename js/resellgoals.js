@@ -306,7 +306,7 @@ async function renderDuoSection(container, root) {
 
   wrap.append(el('div', { class: 'section-head', style: 'margin-top:8px' }, [el('h2', {}, 'Start a duo goal')]));
   if (!state.friends.length) {
-    wrap.append(el('div', { class: 'muted' }, 'Add a friend first (Fitness → Friends), then invite them here.'));
+    wrap.append(el('div', { class: 'muted' }, 'Add a friend first (Friends tab), then invite them here.'));
   } else {
     wrap.append(newDuoForm(state, container, root));
   }

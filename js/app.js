@@ -10,11 +10,13 @@ import { loadAndApplyTheme } from './theme.js';
 import { el, toast } from './ui.js';
 import { loadOwnProfile, claimUsername } from './profile.js';
 import { mountRestTimer } from './resttimer.js';
+import { renderFriends } from './social.js';
 
 const sections = {
   resell:  { title: 'Reselling', render: renderResell },
   food:    { title: 'Food',      render: renderFood },
-  fitness: { title: 'Fitness',   render: renderFitness }
+  fitness: { title: 'Fitness',   render: renderFitness },
+  friends: { title: 'Friends',   render: c => renderFriends(c, c) }
 };
 let activeSection = null; // null = Home launcher; otherwise one of the keys above
 
@@ -174,7 +176,7 @@ function usernameGateView() {
       el('div', { style: 'font-size:34px;text-align:center;margin-bottom:10px' }, '👋'),
       el('div', { style: 'font-weight:700;font-size:18px;text-align:center;margin-bottom:6px' }, 'Pick a username'),
       el('div', { class: 'muted', style: 'text-align:center;margin-bottom:16px' },
-        'Used across the whole app — friends will find you by this, in both Fitness and Reselling.'),
+        'Used across the whole app — friends will find you by this. It\'s permanent, so choose carefully.'),
       input, err, btn
     ]));
   });

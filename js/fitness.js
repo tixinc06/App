@@ -1,6 +1,6 @@
 // Fitness view: a gamified hub with sub-tabs. Train hosts the workout planner
 // (templates/splits, from workouts.js) plus workout logging + bodyweight
-// tracking (below). Progress/Ranks/Shop/Friends land in later build phases.
+// tracking (below). Friends lives at the Home level, not here — see js/app.js.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
@@ -12,14 +12,13 @@ import { renderTrain } from './workouts.js';
 import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
-import { renderFriends } from './social.js';
 import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown } from './progression.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
 import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
 import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 
-let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
+let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop'
 
 export async function renderFitness(root) {
   root.innerHTML = '';
@@ -27,8 +26,7 @@ export async function renderFitness(root) {
     { value: 'train', label: 'Train' },
     { value: 'progress', label: 'Progress' },
     { value: 'ranks', label: 'Ranks' },
-    { value: 'shop', label: 'Shop' },
-    { value: 'friends', label: 'Friends' }
+    { value: 'shop', label: 'Shop' }
   ], fitSegment, v => { fitSegment = v; renderFitness(root); }));
 
   const body = el('div');
@@ -46,11 +44,6 @@ export async function renderFitness(root) {
 
   if (fitSegment === 'shop') {
     await renderShop(body, root);
-    return;
-  }
-
-  if (fitSegment === 'friends') {
-    await renderFriends(body, root);
     return;
   }
 

@@ -2,11 +2,13 @@
 // hands control back to app.js via onSelect(key), which drills into that section.
 import { sb } from './supabase.js';
 import { el, money, num, todayISO, staggerChildren } from './ui.js';
+import { loadFriendships } from './profile.js';
 
 const SECTIONS = [
   { key: 'resell', icon: '📦', name: 'Reselling', sub: 'Inventory, sales & profit' },
   { key: 'food', icon: '🍽️', name: 'Food', sub: 'Calories & macros' },
-  { key: 'fitness', icon: '💪', name: 'Fitness', sub: 'Workouts & bodyweight' }
+  { key: 'fitness', icon: '💪', name: 'Fitness', sub: 'Workouts & bodyweight' },
+  { key: 'friends', icon: '👥', name: 'Friends', sub: 'Add friends & compare' }
 ];
 
 export async function renderHome(root, onSelect) {
@@ -22,6 +24,7 @@ export async function renderHome(root, onSelect) {
   loadResellStat().then(sub => updateSub(cardsWrap, 'resell', sub)).catch(() => {});
   loadFoodStat().then(sub => updateSub(cardsWrap, 'food', sub)).catch(() => {});
   loadFitnessStat().then(sub => updateSub(cardsWrap, 'fitness', sub)).catch(() => {});
+  loadFriendsStat().then(sub => updateSub(cardsWrap, 'friends', sub)).catch(() => {});
 }
 
 function homeCard(s, onSelect) {
@@ -72,4 +75,9 @@ async function loadFitnessStat() {
   if (error) return null;
   if (!data || !data.length) return 'No workouts yet';
   return `Last: ${data[0].name || 'Workout'}`;
+}
+
+async function loadFriendsStat() {
+  const { accepted } = await loadFriendships();
+  return accepted.length ? `${accepted.length} friend${accepted.length === 1 ? '' : 's'}` : 'No friends yet';
 }

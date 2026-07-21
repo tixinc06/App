@@ -14,7 +14,7 @@ import {
   skeleton, staggerChildren, openModal, closeModal
 } from './ui.js';
 import {
-  loadOwnProfile, claimUsername, updateProfile, searchProfiles,
+  loadOwnProfile, claimUsername, updateDisplayName, searchProfiles,
   loadFriendships, otherIdOf, sendFriendRequest, respondFriendRequest, removeFriendship
 } from './profile.js';
 
@@ -64,7 +64,7 @@ export async function renderFriends(container, root) {
       el('div', { class: 'dim', style: 'font-size:11px;text-transform:uppercase;font-weight:600' }, 'You'),
       el('div', { style: 'font-weight:700' }, '@' + profile.username)
     ]),
-    el('button', { class: 'btn btn-sm btn-ghost', onClick: () => editProfileForm(profile, container, root) }, 'Edit')
+    el('button', { class: 'btn btn-sm btn-ghost', onClick: () => editDisplayNameForm(profile, container, root) }, 'Edit name')
   ]));
 
   const tabs = [
@@ -112,21 +112,23 @@ function usernameSetupCard(container, root) {
   return el('div', { class: 'card', style: 'padding:20px' }, [
     el('div', { style: 'font-size:30px;text-align:center;margin-bottom:8px' }, '👋'),
     el('div', { style: 'font-weight:700;text-align:center;margin-bottom:4px' }, 'Pick a username'),
-    el('div', { class: 'muted', style: 'text-align:center;margin-bottom:14px' }, 'Friends will find you by this — it can\'t be changed often, choose carefully.'),
+    el('div', { class: 'muted', style: 'text-align:center;margin-bottom:14px' }, 'Friends will find you by this. It\'s permanent, so choose carefully.'),
     input, err, btn
   ]);
 }
 
-function editProfileForm(profile, container, root) {
+// Usernames are permanent (locked at the database level — see
+// migration-username-lock.sql), so this form only ever touches display_name.
+function editDisplayNameForm(profile, container, root) {
   formModal({
-    title: 'Edit profile',
+    title: 'Edit name',
     fields: [
-      { name: 'username', label: 'Username', value: profile.username, required: true },
-      { name: 'display_name', label: 'Display name (optional)', value: profile.display_name || '' }
+      { name: 'display_name', label: 'Display name (optional)', value: profile.display_name || '',
+        help: `Username @${profile.username} can't be changed.` }
     ],
     submitText: 'Save',
     onSubmit: async v => {
-      await updateProfile(v.username, v.display_name);
+      await updateDisplayName(v.display_name);
       toast('Saved', 'ok');
       renderFriends(container, root);
     }

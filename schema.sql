@@ -491,3 +491,22 @@ CREATE TABLE IF NOT EXISTS custom_exercises (
 ALTER TABLE custom_exercises ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own custom_exercises" ON custom_exercises
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ── Profiles: usernames are permanent once set ──────────────────────────────
+CREATE OR REPLACE FUNCTION prevent_username_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.username IS DISTINCT FROM OLD.username THEN
+    RAISE EXCEPTION 'Username cannot be changed once set.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS lock_username ON profiles;
+CREATE TRIGGER lock_username
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_username_change();
