@@ -370,3 +370,40 @@ CREATE POLICY "friends can view shared templates" ON workout_templates
           OR (f.addressee_id = auth.uid() AND f.requester_id = workout_templates.user_id))
     )
   );
+
+-- ── Fitness: quests, streaks, achievements (Phase FG-6) ─────────────────────
+ALTER TABLE fitness_progress ADD COLUMN IF NOT EXISTS streak_freezes INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS streak_freeze_uses (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  week_start  DATE NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, week_start)
+);
+ALTER TABLE streak_freeze_uses ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own streak_freeze_uses" ON streak_freeze_uses
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE TABLE IF NOT EXISTS quest_claims (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  quest_code  TEXT NOT NULL,
+  period_key  TEXT NOT NULL,
+  claimed_at  TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, quest_code, period_key)
+);
+ALTER TABLE quest_claims ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own quest_claims" ON quest_claims
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE TABLE IF NOT EXISTS achievements (
+  id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  code         TEXT NOT NULL,
+  unlocked_at  TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, code)
+);
+ALTER TABLE achievements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own achievements" ON achievements
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

@@ -4,10 +4,10 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, num, toast, emptyState, skeleton, staggerChildren, segmented } from './ui.js';
 import { loadProgress } from './progression.js';
-import { SHOP_ITEMS } from './gamedata.js';
+import { SHOP_ITEMS, STREAK_FREEZE_COST } from './gamedata.js';
 import { applyTheme } from './theme.js';
 
-let shopTab = 'themes'; // 'themes' | 'banners' | 'boosters'
+let shopTab = 'themes'; // 'themes' | 'banners' | 'boosters' | 'freezes'
 
 async function loadShopState() {
   const uid = getUid();
@@ -44,7 +44,8 @@ export async function renderShop(container, root) {
   container.append(segmented([
     { value: 'themes', label: 'Themes' },
     { value: 'banners', label: 'Banners' },
-    { value: 'boosters', label: 'Boosters' }
+    { value: 'boosters', label: 'Boosters' },
+    { value: 'freezes', label: 'Freezes' }
   ], shopTab, v => { shopTab = v; renderShop(container, root); }));
 
   if (shopTab === 'themes') {
@@ -57,6 +58,8 @@ export async function renderShop(container, root) {
     const list = el('div', { class: 'list' }, SHOP_ITEMS.banners.map(b => bannerRow(b, state, owned, container, root)));
     staggerChildren(list);
     container.append(list);
+  } else if (shopTab === 'freezes') {
+    container.append(freezeCard(state, container, root));
   } else {
     const active = state.settings?.active_booster;
     const activeLive = active && new Date(active.expires_at) > new Date();
@@ -70,6 +73,39 @@ export async function renderShop(container, root) {
     const list = el('div', { class: 'list' }, SHOP_ITEMS.boosters.map(b => boosterRow(b, state, activeLive, container, root)));
     staggerChildren(list);
     container.append(list);
+  }
+}
+
+function freezeCard(state, container, root) {
+  const owned = Number(state.progress.streak_freezes || 0);
+  const canAfford = state.progress.plates >= STREAK_FREEZE_COST;
+  return el('div', { class: 'card item' }, [
+    el('div', { class: 'thumb' }, '🧊'),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, 'Streak Freeze'),
+      el('div', { class: 'sub' }, `Protects one missed training week · You own ${owned}`)
+    ]),
+    el('button', {
+      class: 'btn btn-sm ' + (canAfford ? 'btn-primary' : 'btn-ghost'),
+      disabled: !canAfford,
+      onClick: () => buyStreakFreeze(container, root)
+    }, canAfford ? `Buy · ${num(STREAK_FREEZE_COST)}` : `Need ${num(STREAK_FREEZE_COST)}`)
+  ]);
+}
+
+async function buyStreakFreeze(container, root) {
+  try {
+    const progress = await loadProgress();
+    if (Number(progress.plates) < STREAK_FREEZE_COST) { toast('Not enough Plates', 'err'); return; }
+    const { error } = await sb.from('fitness_progress').update({
+      plates: Number(progress.plates) - STREAK_FREEZE_COST,
+      streak_freezes: Number(progress.streak_freezes || 0) + 1
+    }).eq('user_id', progress.user_id);
+    if (error) throw error;
+    toast('Streak Freeze purchased 🧊', 'ok');
+    renderShop(container, root);
+  } catch (ex) {
+    toast(ex.message || 'Purchase failed', 'err');
   }
 }
 

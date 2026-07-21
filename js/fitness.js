@@ -13,7 +13,9 @@ import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
 import { renderFriends } from './social.js';
-import { detectAndSavePRs, checkGoals, award } from './progression.js';
+import { detectAndSavePRs, checkGoals, award, loadProgress } from './progression.js';
+import { computeStreak } from './streaks.js';
+import { loadStats, checkAchievements } from './achievements.js';
 
 let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop' | 'friends'
 
@@ -341,6 +343,23 @@ export function workoutBuilder(root, prefill) {
       } else {
         toast('Workout saved 💪', 'ok');
       }
+
+      // Achievement check is separate + best-effort: it must never block the
+      // workout save, and it needs true lifetime totals (not just this save).
+      try {
+        const prog = gains?.progress || await loadProgress();
+        const { data: wRows } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
+        const streak = await computeStreak(wRows || []);
+        const stats = await loadStats(prog, streak.current);
+        const achEvents = await checkAchievements(stats);
+        if (achEvents.length) {
+          const achGains = await award(achEvents);
+          for (const a of achEvents) toast(`🏆 ${a.label} unlocked! +${a.xp} XP · +${a.plates} Plates`, 'ok');
+          celebrate();
+          if (achGains?.levelsGained > 0) toast(achGains.levelsGained > 1 ? `Level up ×${achGains.levelsGained}!` : 'Level up!', 'ok');
+        }
+      } catch { /* best-effort — achievements can catch up on the next save */ }
+
       renderFitness(root);
     } catch (ex) {
       err.textContent = ex.message || 'Failed to save.';

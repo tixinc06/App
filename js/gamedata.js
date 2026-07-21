@@ -56,3 +56,46 @@ export const SHOP_ITEMS = {
     { code: 'xp3x_30m', name: '3× XP Booster', price: 200, multiplier: 3, durationMinutes: 30 }
   ]
 };
+
+// ── Streaks ──────────────────────────────────────────────────────────────────
+// A streak freeze protects one missed training WEEK from breaking your streak
+// (js/streaks.js). Bought individually — you can stack several.
+export const STREAK_FREEZE_COST = 150;
+
+// Prestige title shown next to your level, indexed by `progress.prestige`
+// (0 = not yet prestiged once). Master Prestige gets its own fixed title.
+export const PRESTIGE_TITLES = [
+  'Rookie', 'Contender', 'Grinder', 'Warrior', 'Veteran',
+  'Elite', 'Vanguard', 'Titan', 'Legend', 'Mythic'
+];
+export const MASTER_TITLE = 'Master';
+
+// ── Quests ───────────────────────────────────────────────────────────────────
+// Weekly quests, reset every Monday (week key = ISO year-week). Progress is
+// computed live from workouts/PRs/goals in the current week (js/quests.js);
+// claiming awards XP/Plates once per quest per week (quest_claims table).
+export const QUESTS = [
+  { code: 'weekly_3_workouts', label: 'Train 3 times this week', metric: 'workouts', target: 3, xp: 150, plates: 40, icon: '🏋️' },
+  { code: 'weekly_5_workouts', label: 'Train 5 times this week', metric: 'workouts', target: 5, xp: 300, plates: 90, icon: '🔥' },
+  { code: 'weekly_pr', label: 'Hit a new PR this week', metric: 'prs', target: 1, xp: 200, plates: 60, icon: '📈' },
+  { code: 'weekly_goal', label: 'Achieve a goal this week', metric: 'goals', target: 1, xp: 250, plates: 70, icon: '🎯' }
+];
+
+// ── Achievements ─────────────────────────────────────────────────────────────
+// One-time unlocks, persisted to the `achievements` table so history and
+// unlock timestamps survive even if the underlying stat later changes.
+// `metric` is looked up against a stats object built by js/achievements.js.
+export const ACHIEVEMENTS = [
+  { code: 'first_workout', label: 'First Workout', icon: '🥇', metric: 'workoutsTotal', target: 1, xp: 50, plates: 20 },
+  { code: 'workouts_10', label: '10 Workouts', icon: '🏋️', metric: 'workoutsTotal', target: 10, xp: 100, plates: 30 },
+  { code: 'workouts_50', label: '50 Workouts', icon: '💪', metric: 'workoutsTotal', target: 50, xp: 300, plates: 80 },
+  { code: 'workouts_100', label: '100 Workouts', icon: '🏆', metric: 'workoutsTotal', target: 100, xp: 600, plates: 150 },
+  { code: 'first_pr', label: 'First PR', icon: '📈', metric: 'prsTotal', target: 1, xp: 80, plates: 25 },
+  { code: 'prs_10', label: '10 Personal Records', icon: '🚀', metric: 'prsTotal', target: 10, xp: 250, plates: 70 },
+  { code: 'first_goal', label: 'First Goal Achieved', icon: '🎯', metric: 'goalsTotal', target: 1, xp: 100, plates: 30 },
+  { code: 'first_prestige', label: 'First Prestige', icon: '⭐', metric: 'prestige', target: 1, xp: 200, plates: 60 },
+  { code: 'prestige_5', label: 'Prestige 5', icon: '🌟', metric: 'prestige', target: 5, xp: 500, plates: 150 },
+  { code: 'master_prestige', label: 'Master Prestige', icon: '👑', metric: 'isMaster', target: 1, xp: 1000, plates: 300 },
+  { code: 'streak_4', label: '4-Week Streak', icon: '🔥', metric: 'streak', target: 4, xp: 150, plates: 40 },
+  { code: 'streak_12', label: '12-Week Streak', icon: '🔥🔥', metric: 'streak', target: 12, xp: 400, plates: 100 }
+];

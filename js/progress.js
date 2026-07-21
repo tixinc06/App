@@ -7,7 +7,10 @@ import {
   skeleton, staggerChildren, countUp, celebrate
 } from './ui.js';
 import { loadProgress, xpToNext, maxLevelForTrack, prestige } from './progression.js';
-import { MAX_PRESTIGE, SHOP_ITEMS } from './gamedata.js';
+import { MAX_PRESTIGE, SHOP_ITEMS, PRESTIGE_TITLES, MASTER_TITLE } from './gamedata.js';
+import { computeStreak } from './streaks.js';
+import { loadStats, loadAchievementsView } from './achievements.js';
+import { loadQuestProgress, claimQuest } from './quests.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -31,14 +34,25 @@ async function loadBannerGradient() {
   }
 }
 
+async function loadOwnWorkoutDates() {
+  const { data, error } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
+  if (error) throw error;
+  return data || [];
+}
+
 export async function renderProgress(container, root) {
   container.innerHTML = '';
   container.append(skeleton(1, 'block'), skeleton(4, 'item'));
-  let progress, extras, bannerGradient;
+  let progress, extras, bannerGradient, streak, achievementsView, questsView;
   try {
     progress = await loadProgress();
     extras = await loadExtras();
     bannerGradient = await loadBannerGradient();
+    const workouts = await loadOwnWorkoutDates();
+    streak = await computeStreak(workouts);
+    const stats = await loadStats(progress, streak.current);
+    achievementsView = await loadAchievementsView(stats);
+    questsView = await loadQuestProgress(workouts, extras.prs, extras.goals);
   } catch (ex) {
     container.innerHTML = '';
     container.append(emptyState('⚠️', 'Could not load progress. ' + (ex.message || '')));
@@ -47,6 +61,12 @@ export async function renderProgress(container, root) {
   container.innerHTML = '';
 
   container.append(levelCard(progress, bannerGradient, container, root));
+  container.append(streakCard(streak));
+
+  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weekly quests')]));
+  const questList = el('div', { class: 'list', style: 'margin-bottom:22px' }, questsView.quests.map(q => questRow(q, questsView.weekStart, container, root)));
+  staggerChildren(questList);
+  container.append(questList);
 
   const { prs, goals } = extras;
   const openGoals = goals.filter(g => !g.achieved);
@@ -80,6 +100,67 @@ export async function renderProgress(container, root) {
     staggerChildren(list);
     container.append(list);
   }
+
+  container.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Achievements')]));
+  const achList = el('div', { class: 'list' }, achievementsView.map(achievementRow));
+  staggerChildren(achList);
+  container.append(achList);
+}
+
+function streakCard(streak) {
+  return el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between' }, [
+    el('div', {}, [
+      el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Weekly streak'),
+      el('div', { style: 'font-size:22px;font-weight:800;margin-top:4px' }, `🔥 ${streak.current} week${streak.current === 1 ? '' : 's'}`),
+      streak.longest > streak.current ? el('div', { class: 'dim', style: 'font-size:12px;margin-top:2px' }, `Best: ${streak.longest} weeks`) : null
+    ]),
+    streak.freezesLeft > 0 ? el('div', { style: 'text-align:right' }, [
+      el('div', { class: 'k', style: 'font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Freezes'),
+      el('div', { style: 'font-size:18px;font-weight:800;color:var(--blue)' }, `🧊 ${streak.freezesLeft}`)
+    ]) : null
+  ]);
+}
+
+function questRow(q, weekStart, container, root) {
+  const pct = q.target ? Math.min(100, (q.progress / q.target) * 100) : 0;
+  const status = q.claimed
+    ? el('span', { class: 'pill' }, 'Claimed')
+    : q.completed
+      ? el('button', { class: 'btn btn-sm btn-primary', onClick: () => doClaimQuest(q, weekStart, container, root) }, `Claim`)
+      : el('span', { class: 'dim', style: 'font-size:12px' }, `${q.progress}/${q.target}`);
+  return el('div', { class: 'card item' }, [
+    el('div', { class: 'thumb' }, q.icon),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, q.label),
+      el('div', { class: 'sub' }, `+${num(q.xp)} XP · +${num(q.plates)} Plates`),
+      el('div', { class: 'meter', style: 'margin-top:6px' }, [el('div', { class: 'meter-fill', style: `width:${pct}%` })])
+    ]),
+    status
+  ]);
+}
+
+async function doClaimQuest(q, weekStart, container, root) {
+  try {
+    const gains = await claimQuest(q, weekStart);
+    toast(`+${q.xp} XP · +${q.plates} Plates`, 'ok');
+    if (gains?.levelsGained > 0) celebrate();
+    renderProgress(container, root);
+  } catch (ex) {
+    toast(ex.message || 'Failed to claim', 'err');
+  }
+}
+
+function achievementRow(a) {
+  return el('div', { class: 'card item', style: a.unlocked ? '' : 'opacity:.55' }, [
+    el('div', { class: 'thumb' }, a.icon),
+    el('div', { class: 'grow' }, [
+      el('div', { class: 'title' }, a.label),
+      el('div', { class: 'sub' }, a.unlocked
+        ? `Unlocked ${fmtDate((a.unlockedAt || '').slice(0, 10))}`
+        : `${Math.min(a.value, a.target)}/${a.target}`)
+    ]),
+    a.unlocked ? el('span', { class: 'pill' }, '✓') : null
+  ]);
 }
 
 function levelCard(progress, bannerGradient, container, root) {
@@ -87,9 +168,10 @@ function levelCard(progress, bannerGradient, container, root) {
   const cap = maxLevelForTrack(progress);
   const atCap = progress.level >= cap;
   const pct = Math.min(100, (Number(progress.xp) / need) * 100);
+  const title = progress.is_master ? MASTER_TITLE : (PRESTIGE_TITLES[progress.prestige] || PRESTIGE_TITLES[0]);
   const prestigeLabel = progress.is_master
-    ? `Master Prestige · Level ${progress.level}`
-    : `Prestige ${progress.prestige} · Level ${progress.level}`;
+    ? `${title} · Master Prestige · Level ${progress.level}`
+    : `${title} · Prestige ${progress.prestige} · Level ${progress.level}`;
 
   const xpValEl = el('span', {});
   const platesValEl = el('span', {});

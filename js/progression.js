@@ -62,6 +62,12 @@ export async function award(events) {
     } else if (e.type === 'goal') {
       xpGain += GD.XP_PER_GOAL; platesGain += GD.PLATES_PER_GOAL;
       labels.push(`Goal: ${e.exercise}`);
+    } else if (e.type === 'quest' || e.type === 'achievement') {
+      // Quests/achievements carry their own pre-computed XP/Plates (from the
+      // catalog in gamedata.js) rather than a formula — this branch just
+      // folds them into the same booster + level-roll pipeline as everything else.
+      xpGain += e.xp || 0; platesGain += e.plates || 0;
+      labels.push(`${e.type === 'quest' ? 'Quest' : 'Achievement'}: ${e.label}`);
     }
   }
   if (xpGain === 0 && platesGain === 0) return null;
