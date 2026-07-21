@@ -81,6 +81,69 @@ export const QUESTS = [
   { code: 'weekly_goal', label: 'Achieve a goal this week', metric: 'goals', target: 1, xp: 250, plates: 70, icon: '🎯' }
 ];
 
+// ── Avatar ───────────────────────────────────────────────────────────────────
+// A layered character config: {bg, skin, hair, hairColor, face, outfit}. All
+// parts are free in v1 (js/avatar.js draws them as flat SVG). Colours use hex
+// except 'tank_primary', which reads the equipped theme's --primary so the
+// avatar recolours along with the rest of the app.
+export const AVATAR_PARTS = {
+  backgrounds: [
+    { code: 'aurora', name: 'Aurora', colors: ['#1a1035', '#3a1f5c'] },
+    { code: 'sunset', name: 'Sunset', colors: ['#3d1a2e', '#7a3b2e'] },
+    { code: 'ocean', name: 'Ocean', colors: ['#0a1e2e', '#123a52'] },
+    { code: 'forest', name: 'Forest', colors: ['#0d1f14', '#1e3a24'] },
+    { code: 'crimson', name: 'Crimson', colors: ['#1a0a0a', '#4a1414'] },
+    { code: 'midnight', name: 'Midnight', colors: ['#0a0a12', '#1a1a2e'] }
+  ],
+  skins: [
+    { code: 'light', name: 'Light', color: '#f0c8a0' },
+    { code: 'medium', name: 'Medium', color: '#d9a066' },
+    { code: 'tan', name: 'Tan', color: '#b97a4b' },
+    { code: 'brown', name: 'Brown', color: '#8a5a34' },
+    { code: 'dark', name: 'Dark', color: '#5c3a20' },
+    { code: 'deep', name: 'Deep', color: '#3d2414' }
+  ],
+  hair: [
+    { code: 'bald', name: 'Bald' },
+    { code: 'short', name: 'Short' },
+    { code: 'buzz', name: 'Buzz' },
+    { code: 'messy', name: 'Messy' },
+    { code: 'long', name: 'Long' },
+    { code: 'quiff', name: 'Quiff' },
+    { code: 'ponytail', name: 'Ponytail' },
+    { code: 'curly', name: 'Curly' }
+  ],
+  hairColors: [
+    { code: 'black', name: 'Black', color: '#1a1a1a' },
+    { code: 'brown', name: 'Brown', color: '#5c3a20' },
+    { code: 'blonde', name: 'Blonde', color: '#d9b566' },
+    { code: 'red', name: 'Red', color: '#a34a2e' },
+    { code: 'gray', name: 'Gray', color: '#8a8a8a' },
+    { code: 'blue', name: 'Blue', color: '#3f6fb6' },
+    { code: 'pink', name: 'Pink', color: '#e06ba8' },
+    { code: 'green', name: 'Green', color: '#3fa864' }
+  ],
+  faces: [
+    { code: 'focused', name: 'Focused' },
+    { code: 'smile', name: 'Smile' },
+    { code: 'fierce', name: 'Fierce' },
+    { code: 'cool', name: 'Cool' },
+    { code: 'determined', name: 'Determined' }
+  ],
+  outfits: [
+    { code: 'tank_black', name: 'Black Tank', color: '#22222a' },
+    { code: 'tank_primary', name: 'Team Colors', color: 'var(--primary)' },
+    { code: 'stringer', name: 'Stringer', color: '#3a2a2a' },
+    { code: 'hoodie', name: 'Hoodie', color: '#2a3a4a' },
+    { code: 'tracksuit', name: 'Tracksuit', color: '#1a2a1a' },
+    { code: 'shirtless', name: 'Shirtless', color: null }
+  ]
+};
+
+export const DEFAULT_AVATAR = {
+  bg: 'aurora', skin: 'medium', hair: 'short', hairColor: 'brown', face: 'focused', outfit: 'tank_black'
+};
+
 // ── Achievements ─────────────────────────────────────────────────────────────
 // One-time unlocks, persisted to the `achievements` table so history and
 // unlock timestamps survive even if the underlying stat later changes.

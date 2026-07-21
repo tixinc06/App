@@ -306,6 +306,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   user_id       UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username      TEXT NOT NULL UNIQUE,
   display_name  TEXT,
+  avatar        JSONB,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -510,3 +511,6 @@ CREATE TRIGGER lock_username
   BEFORE UPDATE ON profiles
   FOR EACH ROW
   EXECUTE FUNCTION prevent_username_change();
+
+-- ── Profiles: customizable avatar ────────────────────────────────────────────
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar JSONB;

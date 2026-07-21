@@ -1,16 +1,25 @@
-// Progress tab: level/XP bar, Plates balance, manual Prestige, goals
-// ("100kg bench" etc.), and personal-record history.
+// Fitness "Profile" hub (eg4-style): a compact status row (level/XP, streak,
+// Plates), a hero banner with a customizable avatar + username + prestige
+// title + rank emblem, an Add Friends CTA, a shortcut grid, a "Memories"
+// week-at-a-glance calendar, then the existing weekly quests / goals /
+// personal records / achievements sections. Keeps the old filename/export
+// name (renderProgress) since js/fitness.js already wires it in — only the
+// content changed, not the integration point.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, fmtDate, toast, formModal, confirmModal, actionSheet, emptyState,
-  skeleton, staggerChildren, countUp, celebrate
+  skeleton, staggerChildren, countUp, celebrate, todayISO, isoOf
 } from './ui.js';
 import { loadProgress, xpToNext, maxLevelForTrack, prestige } from './progression.js';
 import { MAX_PRESTIGE, SHOP_ITEMS, PRESTIGE_TITLES, MASTER_TITLE } from './gamedata.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, loadAchievementsView } from './achievements.js';
 import { loadQuestProgress, claimQuest } from './quests.js';
+import { loadOwnProfile } from './profile.js';
+import { loadOverallRank, rankBadge } from './ranks.js';
+import { renderAvatarSVG, avatarCustomizer } from './avatar.js';
+import { goToSegment, workoutBuilder } from './fitness.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -43,16 +52,18 @@ async function loadOwnWorkoutDates() {
 export async function renderProgress(container, root) {
   container.innerHTML = '';
   container.append(skeleton(1, 'block'), skeleton(4, 'item'));
-  let progress, extras, bannerGradient, streak, achievementsView, questsView;
+  let progress, extras, bannerGradient, streak, achievementsView, questsView, profile, overallRank, workouts;
   try {
     progress = await loadProgress();
     extras = await loadExtras();
     bannerGradient = await loadBannerGradient();
-    const workouts = await loadOwnWorkoutDates();
+    workouts = await loadOwnWorkoutDates();
     streak = await computeStreak(workouts);
     const stats = await loadStats(progress, streak.current);
     achievementsView = await loadAchievementsView(stats);
     questsView = await loadQuestProgress(workouts, extras.prs, extras.goals);
+    profile = await loadOwnProfile();
+    overallRank = await loadOverallRank().catch(() => null);
   } catch (ex) {
     container.innerHTML = '';
     container.append(emptyState('⚠️', 'Could not load progress. ' + (ex.message || '')));
@@ -62,10 +73,16 @@ export async function renderProgress(container, root) {
 
   const onCooldown = !!(progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date());
 
-  container.append(levelCard(progress, bannerGradient, container, root));
-  container.append(streakCard(streak));
+  container.append(statusHeader(progress, streak));
+  container.append(heroBanner(profile, progress, bannerGradient, overallRank, container, root));
+  container.append(el('button', {
+    class: 'btn btn-primary btn-block', style: 'margin-bottom:18px',
+    onClick: () => goToSegment('friends', root)
+  }, '👥 Add Friends'));
+  container.append(shortcutGrid(profile, container, root));
+  container.append(memoriesCard(workouts));
 
-  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weekly quests')]));
+  container.append(el('div', { class: 'section-head', id: 'profile-quests' }, [el('h2', {}, 'Weekly quests')]));
   const questList = el('div', { class: 'list', style: 'margin-bottom:22px' }, questsView.quests.map(q => questRow(q, questsView.weekStart, onCooldown, container, root)));
   staggerChildren(questList);
   container.append(questList);
@@ -74,7 +91,7 @@ export async function renderProgress(container, root) {
   const openGoals = goals.filter(g => !g.achieved);
   const achievedGoals = goals.filter(g => g.achieved);
 
-  container.append(el('div', { class: 'section-head' }, [
+  container.append(el('div', { class: 'section-head', id: 'profile-goals' }, [
     el('h2', {}, 'Goals'),
     el('button', { class: 'link', onClick: () => addGoalForm(container, root) }, '＋ Add goal')
   ]));
@@ -103,23 +120,138 @@ export async function renderProgress(container, root) {
     container.append(list);
   }
 
-  container.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Achievements')]));
+  container.append(el('div', { class: 'section-head', style: 'margin-top:22px', id: 'profile-achievements' }, [el('h2', {}, 'Achievements')]));
   const achList = el('div', { class: 'list' }, achievementsView.map(achievementRow));
   staggerChildren(achList);
   container.append(achList);
 }
 
-function streakCard(streak) {
-  return el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between' }, [
-    el('div', {}, [
-      el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Weekly streak'),
-      el('div', { style: 'font-size:22px;font-weight:800;margin-top:4px' }, `🔥 ${streak.current} week${streak.current === 1 ? '' : 's'}`),
-      streak.longest > streak.current ? el('div', { class: 'dim', style: 'font-size:12px;margin-top:2px' }, `Best: ${streak.longest} weeks`) : null
+// ── Status header (Lv/XP · streak · Plates) ─────────────────────────────────
+function statusHeader(progress, streak) {
+  const need = xpToNext(progress);
+  const pct = Math.min(100, (Number(progress.xp) / need) * 100);
+  const xpValEl = el('span', {});
+  const plateEl = el('span', {});
+
+  const row = el('div', { class: 'profile-status-row' }, [
+    el('div', { class: 'profile-status-lv' }, [
+      el('span', { class: 'profile-lv-badge' }, `Lv.${progress.level}`),
+      el('div', { style: 'flex:1;min-width:0' }, [
+        el('div', { class: 'meter profile-lv-meter' }, [el('div', { class: 'meter-fill', style: `width:${pct.toFixed(1)}%` })]),
+        el('div', { class: 'profile-lv-xp' }, [xpValEl, el('span', { class: 'dim' }, ` / ${num(need)} XP`)])
+      ])
     ]),
-    streak.freezesLeft > 0 ? el('div', { style: 'text-align:right' }, [
-      el('div', { class: 'k', style: 'font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Freezes'),
-      el('div', { style: 'font-size:18px;font-weight:800;color:var(--blue)' }, `🧊 ${streak.freezesLeft}`)
-    ]) : null
+    el('div', {
+      class: 'profile-status-stat',
+      title: streak.longest > streak.current ? `Best: ${streak.longest} weeks` : undefined
+    }, [
+      el('span', {}, '🔥'), el('span', {}, String(streak.current)),
+      streak.freezesLeft > 0 ? el('span', { class: 'dim', style: 'font-size:11px;margin-left:1px' }, `🧊${streak.freezesLeft}`) : null
+    ]),
+    el('div', { class: 'profile-status-stat' }, [el('span', {}, '💠'), plateEl])
+  ]);
+  countUp(xpValEl, Number(progress.xp), num);
+  countUp(plateEl, Number(progress.plates), num);
+  return row;
+}
+
+// ── Hero banner (avatar + username + title + rank) ──────────────────────────
+function heroBanner(profile, progress, bannerGradient, overallRank, container, root) {
+  const cap = maxLevelForTrack(progress);
+  const atCap = progress.level >= cap;
+  const title = progress.is_master ? MASTER_TITLE : (PRESTIGE_TITLES[progress.prestige] || PRESTIGE_TITLES[0]);
+  const heroBg = bannerGradient || 'linear-gradient(160deg,var(--bg2),var(--bg))';
+
+  return el('div', { class: 'profile-hero', style: `background:${heroBg}` }, [
+    el('div', { class: 'profile-hero-top' }, [
+      el('div', {}, [
+        el('div', { class: 'profile-hero-username' }, '@' + (profile?.username || '—')),
+        el('div', { class: 'profile-hero-title' }, title)
+      ]),
+      rankBadge(overallRank?.tier)
+    ]),
+    el('div', { class: 'profile-hero-avatar-wrap' }, [renderAvatarSVG(profile?.avatar, { size: 150 })]),
+    el('div', { class: 'row', style: 'justify-content:center;gap:8px;margin-top:4px' }, [
+      el('button', {
+        type: 'button', class: 'btn btn-sm btn-ghost profile-customize-btn',
+        onClick: () => openAvatarCustomizer(profile, container, root)
+      }, '✎ Customize'),
+      atCap && !progress.is_master ? el('button', {
+        type: 'button', class: 'btn btn-sm btn-primary',
+        onClick: () => doPrestige(container, root)
+      }, progress.prestige + 1 >= MAX_PRESTIGE ? '⭐ Master Prestige' : '⭐ Prestige') : null
+    ])
+  ]);
+}
+
+function openAvatarCustomizer(profile, container, root) {
+  avatarCustomizer(profile?.avatar, () => renderProgress(container, root));
+}
+
+function doPrestige(container, root) {
+  confirmModal({
+    title: 'Prestige?',
+    message: 'Your level resets to 1. You keep your Plates, PRs, and goals. Prestige is permanent.',
+    confirmText: 'Prestige',
+    danger: false,
+    onConfirm: async () => {
+      const result = await prestige();
+      toast(result.enteredMaster ? 'Master Prestige unlocked! 👑' : 'Prestiged! ⭐', 'ok');
+      celebrate();
+      renderProgress(container, root);
+    }
+  });
+}
+
+// ── Shortcut grid ─────────────────────────────────────────────────────────
+function scrollToId(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function shortcutGrid(profile, container, root) {
+  const items = [
+    { icon: '✎', label: 'Customize', onClick: () => openAvatarCustomizer(profile, container, root) },
+    { icon: '🏅', label: 'Ranks', onClick: () => goToSegment('ranks', root) },
+    { icon: '🛒', label: 'Shop', onClick: () => goToSegment('shop', root) },
+    { icon: '📜', label: 'Quests', onClick: () => scrollToId('profile-quests') },
+    { icon: '🎖️', label: 'Medals', onClick: () => scrollToId('profile-achievements') },
+    { icon: '🗓️', label: 'Routines', onClick: () => goToSegment('train', root) },
+    { icon: '▶', label: 'Quick log', onClick: () => workoutBuilder(root) },
+    { icon: '🎯', label: 'Goals', onClick: () => scrollToId('profile-goals') }
+  ];
+  return el('div', { class: 'profile-grid' }, items.map(i => el('div', {
+    class: 'profile-grid-tile', onClick: i.onClick
+  }, [
+    el('div', { class: 'profile-grid-icon' }, i.icon),
+    el('div', { class: 'profile-grid-label' }, i.label)
+  ])));
+}
+
+// ── Memories (week-at-a-glance) ──────────────────────────────────────────────
+function memoriesCard(workouts) {
+  const workoutDates = new Set(workouts.map(w => w.workout_date));
+  const today = new Date();
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() - today.getDay());
+  const labels = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  const todayIso = todayISO();
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(sunday);
+    d.setDate(sunday.getDate() + i);
+    days.push(d);
+  }
+  return el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:20px' }, [
+    el('div', { class: 'section-head', style: 'margin:0 0 12px' }, [el('h2', {}, '📅 Memories')]),
+    el('div', { class: 'memories-row' }, days.map((d, i) => {
+      const iso = isoOf(d);
+      const has = workoutDates.has(iso);
+      const isToday = iso === todayIso;
+      return el('div', { class: 'memories-day' + (has ? ' has-workout' : '') + (isToday ? ' is-today' : '') }, [
+        el('div', { class: 'memories-dow' }, labels[i]),
+        el('div', { class: 'memories-date' }, String(d.getDate()))
+      ]);
+    }))
   ]);
 }
 
@@ -165,64 +297,6 @@ function achievementRow(a) {
     ]),
     a.unlocked ? el('span', { class: 'pill' }, '✓') : null
   ]);
-}
-
-function levelCard(progress, bannerGradient, container, root) {
-  const need = xpToNext(progress);
-  const cap = maxLevelForTrack(progress);
-  const atCap = progress.level >= cap;
-  const pct = Math.min(100, (Number(progress.xp) / need) * 100);
-  const title = progress.is_master ? MASTER_TITLE : (PRESTIGE_TITLES[progress.prestige] || PRESTIGE_TITLES[0]);
-  const prestigeLabel = progress.is_master
-    ? `${title} · Master Prestige · Level ${progress.level}`
-    : `${title} · Prestige ${progress.prestige} · Level ${progress.level}`;
-
-  const xpValEl = el('span', {});
-  const platesValEl = el('span', {});
-
-  const card = el('div', { class: 'card', style: 'padding:18px;margin-bottom:20px' }, [
-    bannerGradient ? el('div', {
-      style: `height:5px;background:${bannerGradient};border-radius:12px 12px 0 0;margin:-18px -18px 14px -18px`
-    }) : null,
-    el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
-      el('div', {}, [
-        el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, prestigeLabel),
-        el('div', { style: 'font-size:26px;font-weight:800;margin-top:4px' }, [
-          xpValEl,
-          el('span', { class: 'dim', style: 'font-size:14px' }, ` / ${num(need)} XP`)
-        ])
-      ]),
-      el('div', { style: 'text-align:right' }, [
-        el('div', { class: 'k', style: 'font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Plates'),
-        el('div', { style: 'font-size:20px;font-weight:800;color:var(--amber)' }, [platesValEl])
-      ])
-    ]),
-    el('div', { class: 'meter', style: 'margin-top:12px' }, [
-      el('div', { class: 'meter-fill', style: `width:${pct.toFixed(1)}%` })
-    ]),
-    atCap && !progress.is_master ? el('button', {
-      class: 'btn btn-primary btn-block', style: 'margin-top:14px',
-      onClick: () => doPrestige(container, root)
-    }, progress.prestige + 1 >= MAX_PRESTIGE ? '⭐ Enter Master Prestige' : `⭐ Prestige (${progress.prestige} → ${progress.prestige + 1})`) : null
-  ]);
-  countUp(xpValEl, Number(progress.xp), num);
-  countUp(platesValEl, Number(progress.plates), num);
-  return card;
-}
-
-function doPrestige(container, root) {
-  confirmModal({
-    title: 'Prestige?',
-    message: 'Your level resets to 1. You keep your Plates, PRs, and goals. Prestige is permanent.',
-    confirmText: 'Prestige',
-    danger: false,
-    onConfirm: async () => {
-      const result = await prestige();
-      toast(result.enteredMaster ? 'Master Prestige unlocked! 👑' : 'Prestiged! ⭐', 'ok');
-      celebrate();
-      renderProgress(container, root);
-    }
-  });
 }
 
 function goalRow(g, prs, container, root) {

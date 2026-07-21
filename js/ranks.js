@@ -15,6 +15,14 @@ const TIER_CLASS = {
 // handful of isolation lifts can't skew it.
 const MAJOR_LIFTS = new Set(['Bench Press', 'Squat', 'Deadlift', 'Overhead Press']);
 
+// Exported so the Profile hub (js/progress.js) can show a rank emblem
+// without duplicating the bodyweight/PR fetch + tier math.
+export async function loadOverallRank() {
+  const { prs, bodyweight } = await loadRankData();
+  if (!bodyweight) return null;
+  return computeOverallRank(computeExerciseRanks(prs, bodyweight));
+}
+
 async function loadRankData() {
   const uid = getUid();
   const [prs, weights] = await Promise.all([
@@ -82,7 +90,7 @@ export async function renderRanks(container, root) {
   }
 }
 
-function rankBadge(tier) {
+export function rankBadge(tier) {
   if (!tier) return el('span', { class: 'pill' }, 'Unranked');
   return el('span', { class: 'rank-badge ' + (TIER_CLASS[tier] || '') }, tier);
 }

@@ -298,6 +298,46 @@ textarea{resize:vertical; min-height:70px}
 /* ── Returned pill ────────────────────────────────────────────────────────── */
 .pill.returned{background:rgba(255,179,65,.14); color:var(--amber); margin-left:6px; vertical-align:middle}
 
+/* ── Fitness Profile hub (status row, hero, grid, memories) ──────────────── */
+.profile-status-row{display:flex; align-items:center; gap:16px; padding:14px 16px; margin-bottom:16px;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius)}
+.profile-status-lv{display:flex; align-items:center; gap:10px; flex:1; min-width:0}
+.profile-lv-badge{font-size:15px; font-weight:800; flex:0 0 auto}
+.profile-lv-meter{margin-bottom:3px}
+.profile-lv-xp{font-size:11px; font-weight:600; color:var(--text)}
+.profile-status-stat{display:flex; align-items:center; gap:4px; font-size:15px; font-weight:800; flex:0 0 auto}
+
+.profile-hero{border-radius:var(--radius); padding:20px 18px 16px; margin-bottom:16px;
+  box-shadow:var(--shadow); position:relative; overflow:hidden}
+.profile-hero-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px}
+.profile-hero-username{font-size:17px; font-weight:800; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.4)}
+.profile-hero-title{font-size:13px; font-weight:700; color:#ffd76b; text-shadow:0 1px 4px rgba(0,0,0,.4); margin-top:2px}
+.profile-hero-avatar-wrap{display:flex; justify-content:center; margin:8px 0 12px}
+.profile-hero-avatar-wrap .avatar-svg{filter:drop-shadow(0 8px 18px rgba(0,0,0,.35))}
+.profile-customize-btn{background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.25); color:#fff}
+.profile-customize-btn:active{background:rgba(255,255,255,.2)}
+
+.profile-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px}
+.profile-grid-tile{display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 6px;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer;
+  transition:transform .1s cubic-bezier(.34,1.56,.64,1)}
+.profile-grid-tile:active{transform:scale(.94)}
+.profile-grid-icon{font-size:22px}
+.profile-grid-label{font-size:11px; font-weight:600; color:var(--muted); text-align:center; line-height:1.2}
+
+.memories-row{display:flex; gap:6px}
+.memories-day{flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 2px;
+  border-radius:var(--radius-sm); background:var(--bg2)}
+.memories-dow{font-size:10px; font-weight:700; color:var(--muted-dim); text-transform:uppercase}
+.memories-date{font-size:13px; font-weight:700; color:var(--muted)}
+.memories-day.has-workout{background:rgba(34,217,154,.16)}
+.memories-day.has-workout .memories-date{color:var(--green)}
+.memories-day.is-today{outline:2px solid var(--primary-soft); outline-offset:-2px}
+
+/* ── Avatar (js/avatar.js — inline SVG, sized via width/height attrs) ────── */
+.avatar-svg{display:block; border-radius:50%; flex:0 0 auto}
+.thumb.avatar-thumb{background:transparent; padding:0}
+
 /* ── Home launcher ────────────────────────────────────────────────────────── */
 .home-greeting{margin:4px 2px 20px}
 .home-greeting h1{font-size:24px; font-weight:800; letter-spacing:-.4px}

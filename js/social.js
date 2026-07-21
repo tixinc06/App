@@ -17,6 +17,13 @@ import {
   loadOwnProfile, claimUsername, updateDisplayName, searchProfiles,
   loadFriendships, otherIdOf, sendFriendRequest, respondFriendRequest, removeFriendship
 } from './profile.js';
+import { renderAvatarSVG } from './avatar.js';
+
+function avatarThumb(avatarConfig, size = 46) {
+  const wrap = el('div', { class: 'thumb avatar-thumb' });
+  wrap.append(renderAvatarSVG(avatarConfig, { size }));
+  return wrap;
+}
 
 let friendsView = 'friends'; // 'friends' | 'requests' | 'leaderboard' | 'add'
 
@@ -60,9 +67,12 @@ export async function renderFriends(container, root) {
   }
 
   container.append(el('div', { class: 'card', style: 'padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between' }, [
-    el('div', {}, [
-      el('div', { class: 'dim', style: 'font-size:11px;text-transform:uppercase;font-weight:600' }, 'You'),
-      el('div', { style: 'font-weight:700' }, '@' + profile.username)
+    el('div', { style: 'display:flex;align-items:center;gap:12px' }, [
+      avatarThumb(profile.avatar, 44),
+      el('div', {}, [
+        el('div', { class: 'dim', style: 'font-size:11px;text-transform:uppercase;font-weight:600' }, 'You'),
+        el('div', { style: 'font-weight:700' }, '@' + profile.username)
+      ])
     ]),
     el('button', { class: 'btn btn-sm btn-ghost', onClick: () => editDisplayNameForm(profile, container, root) }, 'Edit name')
   ]));
@@ -152,7 +162,7 @@ function renderFriendsList(body, data, container, root) {
     const prof = data.profileById[oid];
     const prog = data.progressById[oid];
     return el('div', { class: 'card item', onClick: () => openFriendDetail(oid, prof, prog, container, root) }, [
-      el('div', { class: 'thumb' }, '🧑'),
+      avatarThumb(prof?.avatar),
       el('div', { class: 'grow' }, [
         el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')),
         el('div', { class: 'sub' }, prof?.display_name || '')
@@ -170,7 +180,7 @@ function renderRequests(body, data, container, root) {
     const list = el('div', { class: 'list', style: 'margin-bottom:16px' }, data.incoming.map(f => {
       const prof = data.profileById[f.requester_id];
       return el('div', { class: 'card item' }, [
-        el('div', { class: 'thumb' }, '🧑'),
+        avatarThumb(prof?.avatar),
         el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + (prof?.username || 'unknown'))]),
         el('div', { class: 'row', style: 'flex:0 0 auto;gap:6px' }, [
           el('button', { class: 'btn btn-sm btn-primary', onClick: () => respondRequest(f, true, container, root) }, 'Accept'),
@@ -186,7 +196,7 @@ function renderRequests(body, data, container, root) {
     const list = el('div', { class: 'list' }, data.outgoing.map(f => {
       const prof = data.profileById[f.addressee_id];
       return el('div', { class: 'card item' }, [
-        el('div', { class: 'thumb' }, '🧑'),
+        avatarThumb(prof?.avatar),
         el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')), el('div', { class: 'sub' }, 'Pending')]),
         el('button', { class: 'btn btn-sm btn-ghost', onClick: () => cancelRequest(f, container, root) }, 'Cancel')
       ]);
@@ -297,7 +307,7 @@ function renderAddFriend(body, data, container, root) {
       results.append(...matches.map(m => {
         const already = knownIds.has(m.user_id);
         return el('div', { class: 'card item' }, [
-          el('div', { class: 'thumb' }, '🧑'),
+          avatarThumb(m.avatar),
           el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + m.username)]),
           already
             ? el('span', { class: 'pill' }, 'Already added')
@@ -338,7 +348,10 @@ async function openFriendDetail(oid, prof, prog, container, root) {
   const openGoals = goals.filter(g => !g.achieved);
 
   const body = el('div', {}, [
-    el('h3', {}, '@' + (prof?.username || 'unknown')),
+    el('div', { style: 'display:flex;align-items:center;gap:12px' }, [
+      avatarThumb(prof?.avatar, 56),
+      el('h3', { style: 'margin:0' }, '@' + (prof?.username || 'unknown'))
+    ]),
     el('div', { style: 'margin:10px 0 16px' }, [levelBadge(prog)]),
     el('div', { class: 'section-head' }, [el('h2', {}, 'Goals')]),
     openGoals.length

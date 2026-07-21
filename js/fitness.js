@@ -1,6 +1,10 @@
-// Fitness view: a gamified hub with sub-tabs. Train hosts the workout planner
-// (templates/splits, from workouts.js) plus workout logging + bodyweight
-// tracking (below). Friends lives at the Home level, not here — see js/app.js.
+// Fitness view: a gamified hub with sub-tabs. Profile is the landing tab (an
+// eg4-style hub: status header, avatar hero, friends CTA, shortcuts,
+// Memories calendar, then quests/goals/PRs/achievements — see js/progress.js,
+// which keeps its old filename/export name to minimise churn). Train hosts
+// the workout planner (templates/splits, from workouts.js) plus workout
+// logging + bodyweight tracking (below). Friends also has a Home-level entry
+// (js/app.js) — both call the exact same js/social.js renderFriends.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
@@ -12,27 +16,37 @@ import { renderTrain } from './workouts.js';
 import { renderProgress } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
+import { renderFriends } from './social.js';
 import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown } from './progression.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
 import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
 import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 
-let fitSegment = 'train'; // 'train' | 'progress' | 'ranks' | 'shop'
+let fitSegment = 'profile'; // 'profile' | 'train' | 'ranks' | 'shop' | 'friends'
+
+// Lets other Fitness-scoped modules (js/progress.js's shortcut grid) jump to
+// a different sub-tab without needing to import/mutate module-private state
+// directly — e.g. goToSegment('ranks', root) from the Profile hub's grid.
+export function goToSegment(seg, root) {
+  fitSegment = seg;
+  renderFitness(root);
+}
 
 export async function renderFitness(root) {
   root.innerHTML = '';
   root.append(segmented([
+    { value: 'profile', label: 'Profile' },
     { value: 'train', label: 'Train' },
-    { value: 'progress', label: 'Progress' },
     { value: 'ranks', label: 'Ranks' },
-    { value: 'shop', label: 'Shop' }
+    { value: 'shop', label: 'Shop' },
+    { value: 'friends', label: 'Friends' }
   ], fitSegment, v => { fitSegment = v; renderFitness(root); }));
 
   const body = el('div');
   root.append(body);
 
-  if (fitSegment === 'progress') {
+  if (fitSegment === 'profile') {
     await renderProgress(body, root);
     return;
   }
@@ -44,6 +58,11 @@ export async function renderFitness(root) {
 
   if (fitSegment === 'shop') {
     await renderShop(body, root);
+    return;
+  }
+
+  if (fitSegment === 'friends') {
+    await renderFriends(body, root);
     return;
   }
 
