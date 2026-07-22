@@ -11,12 +11,14 @@ import { el, toast } from './ui.js';
 import { loadOwnProfile, claimUsername } from './profile.js';
 import { mountRestTimer } from './resttimer.js';
 import { renderFriends } from './social.js';
+import { renderAdmin } from './admin.js';
 
 const sections = {
   resell:  { title: 'Reselling', render: renderResell },
   food:    { title: 'Food',      render: renderFood },
   fitness: { title: 'Fitness',   render: renderFitness },
-  friends: { title: 'Friends',   render: c => renderFriends(c, c) }
+  friends: { title: 'Friends',   render: c => renderFriends(c, c) },
+  admin:   { title: 'Admin',     render: c => renderAdmin(c, c) }
 };
 let activeSection = null; // null = Home launcher; otherwise one of the keys above
 
@@ -182,6 +184,37 @@ function usernameGateView() {
   });
 }
 
+// Checked right after showOnly('app'), before anything else mounts — a
+// banned user should never reach Home, the username gate, or any data
+// fetch beyond this one profile read. This is a UI convenience only: the
+// real ban enforcement is the DB trigger that stops a banned user clearing
+// their own `banned` flag (see migration-admin.sql) — this gate just makes
+// the ban actually stop them from using the app day to day.
+async function checkBanned() {
+  try {
+    const profile = await loadOwnProfile();
+    return profile?.banned ? profile : null;
+  } catch {
+    return null; // best-effort — a transient load error shouldn't hard-lock the app
+  }
+}
+
+function bannedView(reason) {
+  const container = document.getElementById('view');
+  document.getElementById('view-title').textContent = 'Suspended';
+  document.getElementById('back-btn').hidden = true;
+  container.innerHTML = '';
+  container.append(el('div', { class: 'card', style: 'padding:24px;margin-top:20px;text-align:center' }, [
+    el('div', { style: 'font-size:34px;margin-bottom:10px' }, '🚫'),
+    el('div', { style: 'font-weight:700;font-size:18px;margin-bottom:8px' }, 'Account suspended'),
+    el('div', { class: 'muted', style: 'margin-bottom:16px' }, reason || 'Contact support if you think this is a mistake.'),
+    el('button', {
+      class: 'btn btn-primary btn-block',
+      onClick: async () => { try { await logout(); } catch (e) { toast(e.message || 'Could not log out', 'err'); } }
+    }, 'Log out')
+  ]));
+}
+
 async function main() {
   if (!IS_CONFIGURED) {
     showOnly('setup-notice');
@@ -194,6 +227,11 @@ async function main() {
   await initSession(async session => {
     if (session) {
       showOnly('app');
+      const banned = await checkBanned();
+      if (banned) {
+        bannedView(banned.ban_reason);
+        return;
+      }
       await ensureUsername();
       activeSection = null;
       renderActive('forward');

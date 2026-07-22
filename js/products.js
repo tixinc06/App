@@ -1,8 +1,12 @@
 // Product catalog: a shared "Community" catalog + each user's private "My products".
 // Lets people save sourcing links/images and quickly start a new inventory item from one.
+// Community is curated: only admins can publish/edit shared products (also
+// enforced in Postgres — see migration-admin.sql's product_catalog policies,
+// which are the real guard; the admin checks here just keep the UI honest).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, money, toast, formModal, confirmModal, actionSheet, emptyState, segmented, skeleton, staggerChildren } from './ui.js';
+import { isAdmin } from './admin.js';
 
 const BUCKET = 'product-images';
 let scope = 'shared'; // 'shared' | 'mine'
@@ -17,6 +21,8 @@ async function loadProducts(which) {
 
 export async function renderProducts(root, onAddToInventory) {
   root.innerHTML = '';
+  const admin = await isAdmin().catch(() => false);
+
   root.append(
     segmented(
       [{ value: 'shared', label: 'Community' }, { value: 'mine', label: 'My products' }],
@@ -42,24 +48,29 @@ export async function renderProducts(root, onAddToInventory) {
   if (!products.length) {
     list.append(emptyState('🛍️', scope === 'mine'
       ? 'No saved products yet. Tap + to add one.'
-      : 'No community products yet. Be the first to add one!'));
+      : (admin ? 'No community products yet. Be the first to add one!' : 'No community products yet.')));
   } else {
     const grid = el('div', { class: 'product-grid' });
-    for (const p of products) grid.append(productCard(p, root, onAddToInventory));
+    for (const p of products) grid.append(productCard(p, root, onAddToInventory, admin));
     staggerChildren(grid);
     list.append(grid);
   }
 
-  root.append(el('button', { class: 'fab', title: 'Add product', onClick: () => addProductForm(root, onAddToInventory) }, '+'));
+  // Non-admins can still save PRIVATE products from either tab; they just
+  // can't publish to Community — so the add button only hides when they're
+  // browsing Community as a non-admin.
+  if (scope === 'mine' || admin) {
+    root.append(el('button', { class: 'fab', title: 'Add product', onClick: () => addProductForm(root, onAddToInventory, admin) }, '+'));
+  }
 }
 
-function productCard(p, root, onAddToInventory) {
+function productCard(p, root, onAddToInventory, admin) {
   const img = p.image_url
     ? el('img', { class: 'p-img', src: p.image_url, alt: '', onError: e => { e.target.replaceWith(el('div', { class: 'p-img' }, '🛍️')); } })
     : el('div', { class: 'p-img' }, '🛍️');
   return el('div', {
     class: 'card product-card',
-    onClick: () => productActions(p, root, onAddToInventory)
+    onClick: () => productActions(p, root, onAddToInventory, admin)
   }, [
     img,
     el('div', { class: 'p-body' }, [
@@ -70,19 +81,21 @@ function productCard(p, root, onAddToInventory) {
   ]);
 }
 
-function productActions(p, root, onAddToInventory) {
+function productActions(p, root, onAddToInventory, admin) {
   const mine = p.user_id === getUid();
   const acts = [
     { label: '📦 Add to inventory', primary: true, onClick: () => onAddToInventory(p) }
   ];
-  if (mine) {
-    acts.push({ label: '✏️ Edit', onClick: () => editProductForm(p, root, onAddToInventory) });
+  if (mine || admin) {
+    acts.push({ label: '✏️ Edit', onClick: () => editProductForm(p, root, onAddToInventory, admin) });
     acts.push({ label: '🗑️ Delete', danger: true, onClick: () => deleteProduct(p, root, onAddToInventory) });
   }
   actionSheet(p.name, acts);
 }
 
-const productFields = (v = {}) => ([
+// The visibility selector only appears for admins — non-admins can only ever
+// save private products (also enforced by the DB CHECK on INSERT/UPDATE).
+const productFields = (v = {}, admin = false) => ([
   { name: 'name', label: 'Product name', required: true, value: v.name, placeholder: 'e.g. Wireless earbuds' },
   { name: 'photo', label: 'Upload photo (optional)', type: 'file' },
   { name: 'image_url', label: 'Or image URL (optional)', value: v.image_url, placeholder: 'https://…', help: 'Used only if no photo is uploaded above.' },
@@ -90,11 +103,11 @@ const productFields = (v = {}) => ([
   { name: 'default_cost', label: 'Typical cost', type: 'number', step: '0.01', min: '0', value: v.default_cost },
   { name: 'category', label: 'Category (optional)', value: v.category },
   { name: 'notes', label: 'Notes (optional)', type: 'textarea', value: v.notes },
-  {
+  ...(admin ? [{
     name: 'is_shared', label: 'Visibility', type: 'select',
     value: v.is_shared === false ? 'no' : 'yes',
     options: [{ value: 'yes', label: 'Shared with community' }, { value: 'no', label: 'Private (just me)' }]
-  }
+  }] : [])
 ]);
 
 // Uploads to the public product-images bucket and returns a public URL.
@@ -106,32 +119,39 @@ async function uploadProductPhoto(file) {
   return data.publicUrl;
 }
 
-function addProductForm(root, onAddToInventory) {
+function addProductForm(root, onAddToInventory, admin) {
   formModal({
     title: 'Add product',
-    fields: productFields(),
+    fields: productFields({}, admin),
     submitText: 'Save product',
     onSubmit: async v => {
       const { is_shared, photo, image_url, ...rest } = v;
+      const finalIsShared = admin && is_shared === 'yes';
       let finalImageUrl = image_url;
       if (photo) {
         try { finalImageUrl = await uploadProductPhoto(photo); }
         catch (ex) { throw new Error('Photo upload failed: ' + (ex.message || 'unknown error')); }
       }
       const { error } = await sb.from('product_catalog')
-        .insert({ ...rest, image_url: finalImageUrl, is_shared: is_shared === 'yes', user_id: getUid() });
+        .insert({ ...rest, image_url: finalImageUrl, is_shared: finalIsShared, user_id: getUid() });
       if (error) throw error;
       toast('Product saved', 'ok');
-      scope = is_shared === 'yes' ? 'shared' : 'mine';
+      scope = finalIsShared ? 'shared' : 'mine';
       renderProducts(root, onAddToInventory);
     }
   });
 }
 
-function editProductForm(p, root, onAddToInventory) {
+function editProductForm(p, root, onAddToInventory, admin) {
+  // A non-admin who owns an already-shared product (e.g. from before
+  // Community became curated) can still edit it — but the save converts it
+  // to private, since the DB no longer lets a non-admin's row stay shared.
+  // Better to make that explicit and predictable than to let the save fail
+  // with an opaque RLS error.
+  const willBePrivatized = p.is_shared && !admin;
   formModal({
     title: 'Edit product',
-    fields: productFields(p),
+    fields: productFields(p, admin),
     submitText: 'Save',
     onSubmit: async v => {
       const { is_shared, photo, image_url, ...rest } = v;
@@ -140,10 +160,10 @@ function editProductForm(p, root, onAddToInventory) {
         try { finalImageUrl = await uploadProductPhoto(photo); }
         catch (ex) { throw new Error('Photo upload failed: ' + (ex.message || 'unknown error')); }
       }
-      const { error } = await sb.from('product_catalog')
-        .update({ ...rest, image_url: finalImageUrl, is_shared: is_shared === 'yes' }).eq('id', p.id);
+      const payload = { ...rest, image_url: finalImageUrl, is_shared: admin ? (is_shared === 'yes') : false };
+      const { error } = await sb.from('product_catalog').update(payload).eq('id', p.id);
       if (error) throw error;
-      toast('Saved', 'ok');
+      toast(willBePrivatized ? 'Saved — moved to My products (Community is admin-managed)' : 'Saved', 'ok');
       renderProducts(root, onAddToInventory);
     }
   });

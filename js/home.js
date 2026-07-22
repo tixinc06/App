@@ -3,6 +3,7 @@
 import { sb } from './supabase.js';
 import { el, money, num, todayISO, staggerChildren } from './ui.js';
 import { loadFriendships } from './profile.js';
+import { isAdmin } from './admin.js';
 
 const SECTIONS = [
   { key: 'resell', icon: '📦', name: 'Reselling', sub: 'Inventory, sales & profit' },
@@ -11,12 +12,31 @@ const SECTIONS = [
   { key: 'friends', icon: '👥', name: 'Friends', sub: 'Add friends & compare' }
 ];
 
+const ADMIN_SECTION = { key: 'admin', icon: '🛡️', name: 'Admin', sub: 'Manage users & progress' };
+
+// Guards against a real race: app.js's auth-state-change listener can fire
+// renderActive()->renderHome() more than once around a single load (e.g. an
+// initial session event followed by a token-refresh event shortly after).
+// That was harmless when this function was effectively synchronous, but the
+// `await isAdmin()` below opens a real gap where a second, newer call can
+// start and finish before the first one resumes — without this guard, both
+// calls would append their own full card set into the same container.
+let homeGen = 0;
+
 export async function renderHome(root, onSelect) {
+  const myGen = ++homeGen;
   root.innerHTML = '';
   root.append(el('div', { class: 'home-greeting' }, [el('h1', {}, 'Welcome back')]));
 
+  // Purely presentational — the real gate is the DB trigger that stops a
+  // non-admin's writes going through even if they reach this panel some
+  // other way (e.g. by guessing the URL of a future deep-link).
+  const admin = await isAdmin().catch(() => false);
+  if (myGen !== homeGen) return; // a newer renderHome call has already taken over
+  const sectionsToShow = admin ? [...SECTIONS, ADMIN_SECTION] : SECTIONS;
+
   const cardsWrap = el('div', { class: 'home-cards' });
-  for (const s of SECTIONS) cardsWrap.append(homeCard(s, onSelect));
+  for (const s of sectionsToShow) cardsWrap.append(homeCard(s, onSelect));
   staggerChildren(cardsWrap);
   root.append(cardsWrap);
 
