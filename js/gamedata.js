@@ -163,6 +163,21 @@ export const DEFAULT_AVATAR = {
   bg: 'aurora', skin: 'medium', hair: 'short', hairColor: 'brown', face: 'focused', outfit: 'tank_black'
 };
 
+// ── Body measurements ────────────────────────────────────────────────────────
+// Fixed metric list, all optional per entry — log whichever you measured.
+// Stored keyed by `key` in body_measurements.values (JSONB).
+export const MEASUREMENT_METRICS = [
+  { key: 'waist', label: 'Waist', unit: 'cm' },
+  { key: 'chest', label: 'Chest', unit: 'cm' },
+  { key: 'hips', label: 'Hips', unit: 'cm' },
+  { key: 'shoulders', label: 'Shoulders', unit: 'cm' },
+  { key: 'left_arm', label: 'Left arm', unit: 'cm' },
+  { key: 'right_arm', label: 'Right arm', unit: 'cm' },
+  { key: 'left_thigh', label: 'Left thigh', unit: 'cm' },
+  { key: 'right_thigh', label: 'Right thigh', unit: 'cm' },
+  { key: 'body_fat', label: 'Body fat', unit: '%' }
+];
+
 // ── Achievements ─────────────────────────────────────────────────────────────
 // One-time unlocks, persisted to the `achievements` table so history and
 // unlock timestamps survive even if the underlying stat later changes.

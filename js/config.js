@@ -17,3 +17,9 @@ export const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzd
 // True once real values have been pasted in (used to show a friendly setup notice).
 export const IS_CONFIGURED =
   SUPABASE_URL.startsWith('https://') && SUPABASE_ANON.length > 20;
+
+// VAPID public key for Web Push (js/push.js). Safe to expose — it's the
+// public half of the keypair; the private half lives only as a Supabase
+// edge function secret and never appears in client code. Generated once;
+// changing it invalidates every existing push subscription.
+export const VAPID_PUBLIC = 'BNOoBTS334HYF21qB0MEA3jwj0cv2E5iPJOVhm9LgzxagIKY-D7OTtlviZPANO6zTMZRfzPcQVIm9g_AG-pLMmU';

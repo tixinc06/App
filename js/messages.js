@@ -89,6 +89,13 @@ async function sendMessage(recipientId, body, attachment) {
   return data;
 }
 
+// Used by js/photos.js's "Share to a friend" — the photo has already been
+// copied into the public progress-shares bucket by that point; this just
+// sends the resulting URL as a chat attachment.
+export async function sendPhotoMessage(recipientId, url) {
+  return sendMessage(recipientId, '', { kind: 'photo', payload: { url } });
+}
+
 // ── Attach sheet: share a product / workout / meal ───────────────────────────
 // `onSent(message)` lets the open conversation append the sent message
 // immediately (same reasoning as sendMessage's return value above).
@@ -185,6 +192,9 @@ async function saveAttachment(att) {
 
 function attachmentCard(att, mine) {
   const p = att.payload || {};
+  if (att.kind === 'photo') {
+    return el('img', { src: p.url, alt: '', class: 'chat-photo' });
+  }
   const icon = att.kind === 'product' ? '📦' : att.kind === 'workout' ? '🏋️' : '🍽️';
   const sub = att.kind === 'product' ? (p.category || 'Product')
     : att.kind === 'workout' ? `${(p.exercises || []).length} exercises`

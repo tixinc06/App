@@ -170,6 +170,8 @@ textarea{resize:vertical; min-height:70px}
 .rt-picker{display:flex; align-items:center; gap:14px; justify-content:center; margin:8px 0 14px}
 .rt-picker-time{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; min-width:64px; text-align:center}
 .rt-picker .btn{width:36px; height:36px; padding:0; font-size:16px}
+.rt-preset-row{display:flex; gap:8px; justify-content:center; margin-bottom:14px}
+.rt-preset-row .btn.active{background:var(--primary); color:#fff; border-color:var(--primary)}
 
 @media (prefers-reduced-motion: reduce){
   .rt-urgent{animation:none}
@@ -374,6 +376,15 @@ textarea{resize:vertical; min-height:70px}
 .chat-bubble-row.mine .chat-bubble{background:var(--primary); color:#fff; border-bottom-right-radius:4px}
 .chat-bubble-row:not(.mine) .chat-bubble{border-bottom-left-radius:4px}
 .chat-attachment{max-width:78%}
+.chat-photo{max-width:78%; border-radius:14px; display:block}
+
+/* ── Progress photos ──────────────────────────────────────────────────────── */
+.photo-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+.photo-cell{position:relative; aspect-ratio:1; border-radius:var(--radius-sm); overflow:hidden;
+  background:var(--bg2); cursor:pointer}
+.photo-thumb{width:100%; height:100%; object-fit:cover; display:block}
+.photo-date{position:absolute; left:0; right:0; bottom:0; padding:4px 6px; font-size:10px; font-weight:700;
+  color:#fff; background:linear-gradient(0deg,rgba(0,0,0,.65),transparent)}
 
 .weekend-event-banner{padding:14px 16px;margin-bottom:16px;
   background:linear-gradient(135deg,rgba(255,179,71,.16),rgba(255,90,54,.12));

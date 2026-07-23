@@ -830,3 +830,68 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages (sender_id, rec
 CREATE INDEX IF NOT EXISTS idx_messages_recipient_unread ON messages (recipient_id, read_at);
 
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+
+-- ── Round 4: push notifications, body measurements, progress photos,
+-- rank-up tracking. See migration-round4.sql for the push dashboard setup.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  endpoint      TEXT NOT NULL UNIQUE,
+  subscription  JSONB NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own push_subscriptions" ON push_subscriptions
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
+
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS notif_prefs JSONB;
+
+CREATE TABLE IF NOT EXISTS body_measurements (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  entry_date  DATE NOT NULL DEFAULT CURRENT_DATE,
+  values      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  note        TEXT DEFAULT '',
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE body_measurements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own body_measurements" ON body_measurements
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements (user_id, entry_date DESC);
+
+CREATE TABLE IF NOT EXISTS progress_photos (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  taken_on      DATE NOT NULL DEFAULT CURRENT_DATE,
+  storage_path  TEXT NOT NULL,
+  weight        NUMERIC,
+  note          TEXT DEFAULT '',
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE progress_photos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own progress_photos" ON progress_photos
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_progress_photos_user_date ON progress_photos (user_id, taken_on DESC);
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('progress-photos', 'progress-photos', false)
+ON CONFLICT (id) DO NOTHING;
+CREATE POLICY "own progress photos read" ON storage.objects FOR SELECT
+  USING (bucket_id = 'progress-photos' AND owner = auth.uid());
+CREATE POLICY "own progress photos insert" ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'progress-photos' AND owner = auth.uid());
+CREATE POLICY "own progress photos delete" ON storage.objects FOR DELETE
+  USING (bucket_id = 'progress-photos' AND owner = auth.uid());
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('progress-shares', 'progress-shares', true)
+ON CONFLICT (id) DO NOTHING;
+CREATE POLICY "public read progress shares" ON storage.objects FOR SELECT
+  USING (bucket_id = 'progress-shares');
+CREATE POLICY "own progress share insert" ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'progress-shares' AND owner = auth.uid());
+CREATE POLICY "own progress share delete" ON storage.objects FOR DELETE
+  USING (bucket_id = 'progress-shares' AND owner = auth.uid());
+
+ALTER TABLE fitness_progress ADD COLUMN IF NOT EXISTS rank_label TEXT;

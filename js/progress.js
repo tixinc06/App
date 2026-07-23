@@ -23,6 +23,10 @@ import { isMuted, toggleMuted } from './sound.js';
 import { goToSegment } from './fitness.js';
 import { loadShopState, equipTheme, equipBanner, activateOwnedBooster } from './shop.js';
 import { renderWeightPlanner } from './tdee.js';
+import { isPushSupported, getPushState, enablePush, disablePush, loadNotifPrefs, saveNotifPrefs, NOTIF_TYPES } from './push.js';
+import { renderMeasurements } from './measurements.js';
+import { renderPhotos } from './photos.js';
+import { plateCalculatorModal } from './platecalc.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -115,6 +119,9 @@ async function renderSubView(container, root) {
     else if (profileView === 'achievements') await renderAchievementsSubView(container, root);
     else if (profileView === 'inventory') await renderInventoryView(container, root);
     else if (profileView === 'weight-planner') await renderWeightPlannerSubView(container, root);
+    else if (profileView === 'alerts') await renderAlertsView(container, root);
+    else if (profileView === 'measurements') await renderMeasurementsView(container, root);
+    else if (profileView === 'photos') await renderPhotosView(container, root);
     else { profileView = 'hub'; return renderProgress(container, root); }
   } catch (ex) {
     container.innerHTML = '';
@@ -184,6 +191,99 @@ async function renderWeightPlannerSubView(container, root) {
   const body = el('div');
   container.append(body);
   await renderWeightPlanner(body, root);
+}
+
+// ── Alerts (push notifications) ──────────────────────────────────────────────
+async function renderAlertsView(container, root) {
+  const pushState = await getPushState();
+  const prefs = await loadNotifPrefs().catch(() => {
+    const fallback = {};
+    for (const t of NOTIF_TYPES) fallback[t.key] = true;
+    return fallback;
+  });
+
+  container.innerHTML = '';
+  container.append(backHeader('Alerts', container, root));
+
+  if (!pushState.supported) {
+    container.append(emptyState('🔕', 'Push notifications aren\'t supported on this device/browser.'));
+    return;
+  }
+
+  const statusText = pushState.permission === 'denied'
+    ? 'Blocked — enable notifications for this site in your browser/phone settings.'
+    : pushState.subscribed ? 'Notifications are on for this device.' : 'Notifications are off.';
+
+  const masterBtn = el('button', {
+    class: 'btn btn-primary btn-block',
+    disabled: pushState.permission === 'denied',
+    onClick: async () => {
+      masterBtn.disabled = true;
+      try {
+        if (pushState.subscribed) {
+          await disablePush();
+          toast('Notifications turned off', 'ok');
+        } else {
+          await enablePush();
+          toast('Notifications enabled 🔔', 'ok');
+        }
+        renderAlertsView(container, root);
+      } catch (ex) {
+        toast(ex.message || 'Failed', 'err');
+        masterBtn.disabled = false;
+      }
+    }
+  }, pushState.subscribed ? 'Turn off notifications' : 'Enable notifications');
+
+  container.append(
+    el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:16px' }, [
+      el('div', { class: 'dim', style: 'font-size:13px;margin-bottom:12px' }, statusText),
+      masterBtn
+    ])
+  );
+
+  if (pushState.subscribed) {
+    const rows = NOTIF_TYPES.map(t => {
+      const checkbox = el('input', { type: 'checkbox' });
+      checkbox.checked = prefs[t.key];
+      checkbox.addEventListener('change', async () => {
+        prefs[t.key] = checkbox.checked;
+        try {
+          await saveNotifPrefs(prefs);
+        } catch (ex) {
+          toast(ex.message || 'Failed to save', 'err');
+          checkbox.checked = !checkbox.checked;
+          prefs[t.key] = checkbox.checked;
+        }
+      });
+      return el('label', { class: 'card item', style: 'align-items:center;gap:10px' }, [
+        checkbox, el('div', { class: 'grow' }, [el('div', { class: 'title' }, t.label)])
+      ]);
+    });
+    container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Notify me about')]));
+    const list = el('div', { class: 'list' }, rows);
+    staggerChildren(list);
+    container.append(list);
+  }
+
+  container.append(el('div', { class: 'dim', style: 'font-size:12px;margin-top:16px' },
+    'On iPhone: install this app to your Home Screen first (Share → Add to Home Screen), then enable notifications from there — iOS only delivers push to installed home-screen apps.'));
+}
+
+async function renderMeasurementsView(container, root) {
+  container.innerHTML = '';
+  container.append(backHeader('Measurements', container, root));
+  const body = el('div');
+  container.append(body);
+  await renderMeasurements(body, root);
+}
+
+async function renderPhotosView(container, root) {
+  container.innerHTML = '';
+  container.append(backHeader('Progress photos', container, root));
+  const body = el('div');
+  container.append(body);
+  await renderPhotos(body, root);
 }
 
 // ── Inventory (owned themes, banners, boosters) ─────────────────────────────
@@ -386,6 +486,10 @@ function shortcutGrid(profile, container, root) {
     { icon: '🎖️', label: 'Medals', onClick: () => goProfileView('achievements', container, root) },
     { icon: '🎒', label: 'Inventory', onClick: () => goProfileView('inventory', container, root) },
     { icon: '⚖️', label: 'Weight planner', onClick: () => goProfileView('weight-planner', container, root) },
+    { icon: '📏', label: 'Measurements', onClick: () => goProfileView('measurements', container, root) },
+    { icon: '📸', label: 'Progress', onClick: () => goProfileView('photos', container, root) },
+    { icon: '🔔', label: 'Alerts', onClick: () => goProfileView('alerts', container, root) },
+    { icon: '🏋️', label: 'Plates', onClick: () => plateCalculatorModal() },
     { icon: '🏅', label: 'Ranks', onClick: () => goToSegment('ranks', root) },
     { icon: '🛒', label: 'Shop', onClick: () => goToSegment('shop', root) },
     { icon: '🗓️', label: 'Routines', onClick: () => goToSegment('train', root) },

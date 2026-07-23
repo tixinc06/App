@@ -250,17 +250,30 @@ export function mountRestTimer() {
 
 // A ±15s duration picker (0:00–5:00), used inside the workout builder to
 // set/adjust the rest length before/while training.
+const DURATION_PRESETS = [60, 90, 120, 180];
+
 export function durationPickerEl(initialSeconds, onChange) {
   let seconds = Math.min(300, Math.max(0, initialSeconds));
   const label = el('span', { class: 'rt-picker-time' }, fmt(seconds * 1000));
+  const presetBtns = {};
   function set(v) {
     seconds = Math.min(300, Math.max(0, v));
     label.textContent = fmt(seconds * 1000);
+    for (const [p, btn] of Object.entries(presetBtns)) btn.classList.toggle('active', Number(p) === seconds);
     onChange(seconds);
   }
-  return el('div', { class: 'rt-picker' }, [
+  const stepper = el('div', { class: 'rt-picker' }, [
     el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => set(seconds - 15) }, '−'),
     label,
     el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => set(seconds + 15) }, '+')
   ]);
+  const presetRow = el('div', { class: 'rt-preset-row' }, DURATION_PRESETS.map(p => {
+    const btn = el('button', {
+      type: 'button', class: 'btn btn-sm btn-ghost' + (p === seconds ? ' active' : ''),
+      onClick: () => set(p)
+    }, fmt(p * 1000));
+    presetBtns[p] = btn;
+    return btn;
+  }));
+  return el('div', {}, [stepper, presetRow]);
 }

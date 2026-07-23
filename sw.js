@@ -3,7 +3,7 @@
 // Strategy: network-first for ALL same-origin requests (so code edits/deploys
 // always land when online), falling back to the cache only when offline. This
 // avoids stale-JavaScript bugs after a deploy.
-const CACHE = 'tracker-v19';
+const CACHE = 'tracker-v20';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/styles.css',
@@ -16,6 +16,7 @@ const ASSETS = [
   './js/profile.js', './js/resellgoals.js',
   './js/exercises.js', './js/resttimer.js', './js/avatar.js', './js/admin.js',
   './js/rankart.js', './js/sound.js', './js/tdee.js', './js/barcode.js', './js/messages.js',
+  './js/push.js', './js/platecalc.js', './js/measurements.js', './js/photos.js', './js/workoutcal.js',
   './icons/icon.svg'
 ];
 
@@ -65,5 +66,36 @@ self.addEventListener('fetch', e => {
       if (isHTML) return (await caches.match('./index.html')) || Response.error();
       return Response.error();
     }
+  })());
+});
+
+// ── Web Push ─────────────────────────────────────────────────────────────────
+self.addEventListener('push', e => {
+  let payload = {};
+  try { payload = e.data ? e.data.json() : {}; } catch { /* non-JSON payload — use defaults */ }
+  const title = payload.title || 'Tracker';
+  const body = payload.body || '';
+  const url = payload.url || './';
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      tag: payload.tag || 'tracker-push',
+      renotify: true,
+      data: { url }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || './';
+  e.waitUntil((async () => {
+    const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clientsList) {
+      if (client.url.includes(self.location.origin) && 'focus' in client) return client.focus();
+    }
+    return self.clients.openWindow(url);
   })());
 });

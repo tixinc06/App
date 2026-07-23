@@ -15,7 +15,7 @@ import {
 import { lineChart, barChart, chartCard } from './charts.js';
 import { renderTrain } from './workouts.js';
 import { renderProgress, resetProfileView } from './progress.js';
-import { renderRanks } from './ranks.js';
+import { renderRanks, loadOverallRank } from './ranks.js';
 import { renderShop } from './shop.js';
 import { renderFriends } from './social.js';
 import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown } from './progression.js';
@@ -23,7 +23,19 @@ import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
 import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
 import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
+import { plateCalculatorModal } from './platecalc.js';
 import { playSound } from './sound.js';
+
+// Best set by estimated 1RM (Epley) — same convention used for PR detection
+// in js/progression.js. Used to anchor the progressive-overload hint.
+function bestSetOf(sets) {
+  let best = null, bestE1rm = 0;
+  for (const s of (sets || [])) {
+    const e1rm = (Number(s.weight) || 0) * (1 + (Number(s.reps) || 0) / 30);
+    if (e1rm > bestE1rm) { bestE1rm = e1rm; best = s; }
+  }
+  return best;
+}
 
 let fitSegment = 'profile'; // 'profile' | 'train' | 'ranks' | 'shop' | 'friends'
 
@@ -279,7 +291,7 @@ export function workoutBuilder(root, prefill) {
     const nameWrap = el('div', { style: 'flex:1;min-width:0' }, [nameInput]);
     attachExercisePicker(nameInput);
 
-    const hintEl = el('div', { class: 'dim', style: 'font-size:12px;margin-top:6px', hidden: true });
+    const hintEl = el('div', { style: 'margin-top:6px', hidden: true });
     let hintTimer = null;
     function refreshHint() {
       clearTimeout(hintTimer);
@@ -288,8 +300,29 @@ export function workoutBuilder(root, prefill) {
       hintTimer = setTimeout(async () => {
         const prev = await loadPreviousPerformance(name);
         if (!prev) { hintEl.hidden = true; return; }
-        hintEl.textContent = `Last time (${fmtDate(prev.date)}): ` +
-          prev.sets.map(s => `${num(s.weight)}×${num(s.reps)}`).join(', ');
+        hintEl.innerHTML = '';
+        hintEl.append(el('div', { class: 'dim', style: 'font-size:12px' },
+          `Last time (${fmtDate(prev.date)}): ` + prev.sets.map(s => `${num(s.weight)}×${num(s.reps)}`).join(', ')));
+
+        // Progressive-overload suggestion off the best set (highest est. 1RM),
+        // matching the same Epley-formula convention used for PR detection.
+        const best = bestSetOf(prev.sets);
+        if (best && Number(best.weight) > 0 && Number(best.reps) > 0) {
+          const incWeight = Math.round((Number(best.weight) + 2.5) * 2) / 2;
+          const sameReps = Number(best.reps);
+          const incReps = sameReps + 1;
+          hintEl.append(el('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:4px' }, [
+            el('div', { class: 'dim', style: 'font-size:12px;flex:1' },
+              `💡 Try ${num(incWeight)}kg × ${sameReps}, or ${num(best.weight)}kg × ${incReps}`),
+            el('button', {
+              type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
+              onClick: () => {
+                if (!sets.length) addSet(incWeight, sameReps);
+                else { sets[0].weightInput.value = incWeight; sets[0].repsInput.value = sameReps; }
+              }
+            }, 'Use')
+          ]));
+        }
         hintEl.hidden = false;
       }, 450);
     }
@@ -436,6 +469,37 @@ export function workoutBuilder(root, prefill) {
         } catch { /* best-effort — achievements can catch up on the next save */ }
       }
 
+      // Rank-up celebration — also best-effort + skipped on cooldown (a rank
+      // change is a byproduct of the PRs just detected above, so if those
+      // were skipped there's nothing new to detect anyway). Compares the
+      // freshly computed overall rank's globalIndex (0-30) against the last
+      // globalIndex stored in fitness_progress.rank_label — "Godly" is
+      // stored as the literal string once achieved (globalIndex alone can't
+      // tell Godly apart from a maxed Grand Champion 3, since Godly doesn't
+      // raise the index further).
+      if (!cooldownUntil) {
+        try {
+          const overall = await loadOverallRank();
+          if (overall) {
+            const prog = await loadProgress();
+            const prevStored = prog.rank_label;
+            const prevIsGodly = prevStored === 'Godly';
+            const prevIndex = prevIsGodly ? 30 : (prevStored != null ? Number(prevStored) : -1);
+            const newIsGodly = !!overall.isGodly;
+            const increased = newIsGodly && !prevIsGodly ? true : (!newIsGodly && overall.globalIndex > prevIndex);
+            const toStore = newIsGodly ? 'Godly' : String(overall.globalIndex);
+            if (increased) {
+              celebrate();
+              playSound('rank_up');
+              toast(`🏅 You reached ${overall.label}!`, 'ok');
+            }
+            if (toStore !== prevStored) {
+              await sb.from('fitness_progress').update({ rank_label: toStore }).eq('user_id', getUid());
+            }
+          }
+        } catch { /* best-effort — rank-up detection can catch up on the next save */ }
+      }
+
       renderFitness(root);
     } catch (ex) {
       err.textContent = ex.message || 'Failed to save.';
@@ -452,7 +516,10 @@ export function workoutBuilder(root, prefill) {
     el('label', {}, ['Workout name', nameInput]),
     el('div', { class: 'section-head', style: 'margin:10px 2px 2px' }, [el('h2', {}, 'Rest timer')]),
     durationPickerEl(restSeconds, v => { restSeconds = v; }),
-    el('div', { class: 'section-head', style: 'margin:10px 2px 10px' }, [el('h2', {}, 'Exercises')]),
+    el('div', { class: 'section-head', style: 'margin:10px 2px 10px' }, [
+      el('h2', {}, 'Exercises'),
+      el('button', { type: 'button', class: 'link', onClick: () => plateCalculatorModal() }, '🏋️ Plate calc')
+    ]),
     exWrap,
     el('button', { type: 'button', class: 'btn btn-ghost btn-block', style: 'margin-bottom:14px', onClick: () => addExercise() }, '＋ Add exercise'),
     el('label', {}, ['Notes', notesInput]),
