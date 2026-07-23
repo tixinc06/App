@@ -9,6 +9,7 @@ import {
   skeleton, staggerChildren, todayISO
 } from './ui.js';
 import { loadFriendships, otherIdOf } from './profile.js';
+import { renderAvatar } from './avatar.js';
 
 const profitOf = s => (Number(s.sale_price) || 0) - (Number(s.fees) || 0) -
   (Number(s.shipping_cost) || 0) - (Number(s.cost_snapshot) || 0);
@@ -259,7 +260,7 @@ async function renderDuoSection(container, root) {
     const list = el('div', { class: 'list', style: 'margin-bottom:16px' }, state.pendingIncoming.map(g => {
       const prof = state.profileById[g.requester_id];
       return el('div', { class: 'card item' }, [
-        el('div', { class: 'thumb' }, '🤝'),
+        el('div', { class: 'thumb avatar-thumb' }, [renderAvatar(prof, { size: 46 })]),
         el('div', { class: 'grow' }, [
           el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')),
           el('div', { class: 'sub' }, `Duo goal · ${money(g.target_profit)}/month`)
@@ -288,7 +289,7 @@ async function renderDuoSection(container, root) {
     const list = el('div', { class: 'list', style: 'margin-bottom:16px' }, state.pendingOutgoing.map(g => {
       const prof = state.profileById[g.addressee_id];
       return el('div', { class: 'card item' }, [
-        el('div', { class: 'thumb' }, '🤝'),
+        el('div', { class: 'thumb avatar-thumb' }, [renderAvatar(prof, { size: 46 })]),
         el('div', { class: 'grow' }, [
           el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')),
           el('div', { class: 'sub' }, `Pending · ${money(g.target_profit)}/month`)
@@ -330,7 +331,10 @@ async function duoGoalCard(g, state, container, root) {
 
   return el('div', { class: 'card', style: 'padding:16px 18px' }, [
     el('div', { style: 'display:flex;align-items:center;justify-content:space-between' }, [
-      el('div', { style: 'font-weight:700' }, 'You + @' + (prof?.username || 'unknown')),
+      el('div', { style: 'display:flex;align-items:center;gap:10px' }, [
+        el('div', { class: 'thumb avatar-thumb', style: 'margin:0' }, [renderAvatar(prof, { size: 34 })]),
+        el('div', { style: 'font-weight:700' }, 'You + @' + (prof?.username || 'unknown'))
+      ]),
       el('button', { class: 'btn btn-sm btn-ghost', onClick: () => deleteDuo(g, container, root) }, 'End')
     ]),
     el('div', { style: 'font-size:20px;font-weight:800;margin-top:6px' }, `${money(combined)} / ${money(target)}`),

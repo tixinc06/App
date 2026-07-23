@@ -6,17 +6,20 @@ import {
   skeleton, staggerChildren, countUp
 } from './ui.js';
 import { lineChart, chartCard } from './charts.js';
+import { scanBarcodeModal, lookupBarcode } from './barcode.js';
 
 let selectedDate = todayISO();
 
 async function loadData(date) {
-  const [foods, logs] = await Promise.all([
+  const [foods, logs, settings] = await Promise.all([
     sb.from('foods').select('*').order('name'),
-    sb.from('food_logs').select('*').eq('log_date', date).order('created_at')
+    sb.from('food_logs').select('*').eq('log_date', date).order('created_at'),
+    sb.from('user_settings').select('calorie_target').eq('user_id', getUid()).maybeSingle()
   ]);
   if (foods.error) throw foods.error;
   if (logs.error) throw logs.error;
-  return { foods: foods.data || [], logs: logs.data || [] };
+  const calorieTarget = settings.error ? null : Number(settings.data?.calorie_target) || null;
+  return { foods: foods.data || [], logs: logs.data || [], calorieTarget };
 }
 
 // Sum calories per day for the last `days` days → continuous series (zeros for gaps).
@@ -45,7 +48,7 @@ export async function renderFood(root) {
     root.append(emptyState('⚠️', 'Could not load data. ' + (ex.message || '')));
     return;
   }
-  const { foods, logs } = data;
+  const { foods, logs, calorieTarget } = data;
   root.innerHTML = '';
 
   // Date navigator
@@ -67,11 +70,20 @@ export async function renderFood(root) {
   }), { cal: 0, p: 0, c: 0, f: 0 });
 
   const calEl = el('div', { style: 'font-size:28px;font-weight:800' });
+  const targetBits = calorieTarget ? [
+    el('div', { class: 'dim', style: 'font-size:13px;margin-top:2px' }, `of ${num(calorieTarget)} kcal target`),
+    el('div', { class: 'meter', style: 'margin-top:10px' }, [
+      el('div', { class: 'meter-fill', style: `width:${Math.min(100, (t.cal / calorieTarget) * 100).toFixed(1)}%` })
+    ]),
+    el('div', { class: 'dim', style: 'font-size:12px;margin-top:6px' },
+      t.cal <= calorieTarget ? `${num(calorieTarget - t.cal)} kcal remaining` : `${num(t.cal - calorieTarget)} kcal over`)
+  ] : [];
   root.append(el('div', { class: 'card', style: 'padding:18px;margin-bottom:18px' }, [
     el('div', { style: 'display:flex;align-items:baseline;justify-content:space-between' }, [
       el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Calories'),
       calEl
     ]),
+    ...targetBits,
     el('div', { class: 'row', style: 'margin-top:14px' }, [
       macro('Protein', t.p), macro('Carbs', t.c), macro('Fat', t.f)
     ])
@@ -98,7 +110,39 @@ export async function renderFood(root) {
     root.append(chartCard('Calories · last 14 days', lineChart(trend, { color: 'var(--amber)', fmt: v => num(v) })));
   }
 
+  root.append(el('button', { class: 'fab fab-secondary', title: 'Scan barcode', onClick: () => scanAndHandle(root) }, '📷'));
   root.append(el('button', { class: 'fab', title: 'Log food', onClick: () => logFoodForm(foods, root) }, '+'));
+}
+
+// Scans a barcode, then: logs instantly if it matches a food already in the
+// user's library (barcode remembered from a prior save), else looks it up on
+// Open Food Facts and opens the New Food form prefilled — or, on a miss,
+// opens it with just the barcode kept so the user can add it manually.
+async function scanAndHandle(root) {
+  const barcode = await scanBarcodeModal();
+  if (!barcode) return;
+
+  const { data: existing } = await sb.from('foods')
+    .select('*').eq('user_id', getUid()).eq('barcode', barcode).maybeSingle();
+  if (existing) {
+    const { error } = await sb.from('food_logs').insert({
+      user_id: getUid(), food_id: existing.id, food_name: existing.name,
+      log_date: selectedDate, servings: 1,
+      calories: existing.calories, protein: existing.protein, carbs: existing.carbs, fat: existing.fat
+    });
+    if (error) { toast(error.message, 'err'); return; }
+    toast(`${existing.name} logged`, 'ok');
+    renderFood(root);
+    return;
+  }
+
+  const hit = await lookupBarcode(barcode);
+  if (hit) {
+    addFoodForm(root, () => renderFood(root), hit);
+  } else {
+    toast('Not found on Open Food Facts — add it manually', '');
+    addFoodForm(root, () => renderFood(root), { barcode });
+  }
 }
 
 function macro(label, val) {
@@ -137,7 +181,8 @@ function logActions(l, root) {
 function logFoodForm(foods, root) {
   if (!foods.length) {
     actionSheet('No foods yet', [
-      { label: '＋ Add a food first', primary: true, onClick: () => addFoodForm(root, () => renderFood(root)) }
+      { label: '📷 Scan a barcode', primary: true, onClick: () => scanAndHandle(root) },
+      { label: '＋ Add a food first', onClick: () => addFoodForm(root, () => renderFood(root)) }
     ]);
     return;
   }
@@ -204,13 +249,15 @@ const foodFields = (v = {}) => ([
   { name: 'fat', label: 'Fat (g)', type: 'number', step: '0.1', min: '0', value: v.fat ?? 0 }
 ]);
 
-function addFoodForm(root, after) {
+function addFoodForm(root, after, prefill = {}) {
   formModal({
-    title: 'New food',
-    fields: foodFields(),
+    title: prefill.barcode && !prefill.name ? 'New food (barcode not found — add manually)' : 'New food',
+    fields: foodFields(prefill),
     submitText: 'Save food',
     onSubmit: async v => {
-      const { error } = await sb.from('foods').insert({ ...v, user_id: getUid() });
+      const payload = { ...v, user_id: getUid() };
+      if (prefill.barcode) payload.barcode = prefill.barcode;
+      const { error } = await sb.from('foods').insert(payload);
       if (error) throw error;
       toast('Food saved', 'ok');
       (after || (() => renderFood(root)))();

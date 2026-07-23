@@ -409,6 +409,7 @@ export function workoutBuilder(root, prefill) {
       } else if (gains) {
         const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
         if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
+        if (gains.eventApplied) bits.push('⚡ Double weekend!');
         if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
         toast(bits.join(' · '), 'ok');
         if (gains.levelsGained > 0) { celebrate(); playSound('level_up'); }

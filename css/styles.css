@@ -128,6 +128,8 @@ textarea{resize:vertical; min-height:70px}
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
   box-shadow:0 10px 24px -6px rgba(109,94,252,.7); display:grid; place-items:center}
 .fab:active{transform:scale(.94)}
+.fab-secondary{right:86px; width:48px; height:48px; font-size:20px;
+  background:var(--card2); color:var(--text); box-shadow:var(--shadow); border:1px solid var(--border)}
 
 /* ── Rest timer ───────────────────────────────────────────────────────────── */
 .rest-timer-bar{
@@ -361,6 +363,22 @@ textarea{resize:vertical; min-height:70px}
 /* ── Returned pill ────────────────────────────────────────────────────────── */
 .pill.returned{background:rgba(255,179,65,.14); color:var(--amber); margin-left:6px; vertical-align:middle}
 
+/* ── Chat ─────────────────────────────────────────────────────────────────── */
+.chat-modal{display:flex; flex-direction:column; max-height:78vh}
+.chat-messages{flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:6px;
+  min-height:200px; max-height:52vh; padding:4px 2px}
+.chat-bubble-row{display:flex; justify-content:flex-start}
+.chat-bubble-row.mine{justify-content:flex-end}
+.chat-bubble{max-width:78%; padding:9px 13px; border-radius:16px; background:var(--bg2);
+  font-size:14px; line-height:1.4; word-break:break-word}
+.chat-bubble-row.mine .chat-bubble{background:var(--primary); color:#fff; border-bottom-right-radius:4px}
+.chat-bubble-row:not(.mine) .chat-bubble{border-bottom-left-radius:4px}
+.chat-attachment{max-width:78%}
+
+.weekend-event-banner{padding:14px 16px;margin-bottom:16px;
+  background:linear-gradient(135deg,rgba(255,179,71,.16),rgba(255,90,54,.12));
+  border:1px solid rgba(255,179,71,.35)}
+
 /* ── Fitness Profile hub (status row, hero, grid, memories) ──────────────── */
 .profile-status-row{display:flex; align-items:center; gap:16px; padding:14px 16px; margin-bottom:16px;
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius)}
@@ -404,6 +422,7 @@ textarea{resize:vertical; min-height:70px}
 
 /* ── Avatar (js/avatar.js — inline SVG, sized via width/height attrs) ────── */
 .avatar-svg{display:block; border-radius:50%; flex:0 0 auto}
+.avatar-photo{display:block; border-radius:50%; flex:0 0 auto; object-fit:cover}
 .thumb.avatar-thumb{background:transparent; padding:0}
 
 /* ── Home launcher ────────────────────────────────────────────────────────── */

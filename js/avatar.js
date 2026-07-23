@@ -8,8 +8,30 @@ import { getUid } from './auth.js';
 import { el, toast, closeModal, openModal } from './ui.js';
 import { AVATAR_PARTS, DEFAULT_AVATAR } from './gamedata.js';
 
+const AVATAR_BUCKET = 'avatars';
+
 export async function saveAvatar(config) {
   const { error } = await sb.from('profiles').update({ avatar: config }).eq('user_id', getUid());
+  if (error) throw error;
+}
+
+// Uploads to the public avatars bucket and saves the public URL onto the
+// profile — a real photo takes priority over the SVG character everywhere
+// renderAvatar() is used (friends list, leaderboard, hero, duo cards, chat…).
+export async function uploadAvatarPhoto(file) {
+  const uid = getUid();
+  const path = `${uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const up = await sb.storage.from(AVATAR_BUCKET).upload(path, file, { upsert: true, contentType: file.type });
+  if (up.error) throw up.error;
+  const { data } = sb.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+  const { error } = await sb.from('profiles').update({ avatar_url: data.publicUrl }).eq('user_id', uid);
+  if (error) throw error;
+  return data.publicUrl;
+}
+
+// Reverts to the SVG character builder.
+export async function removeAvatarPhoto() {
+  const { error } = await sb.from('profiles').update({ avatar_url: null }).eq('user_id', getUid());
   if (error) throw error;
 }
 
@@ -127,18 +149,88 @@ export function renderAvatarSVG(config, opts = {}) {
   return wrapper.firstElementChild;
 }
 
-// A modal with a live preview + chip-row pickers for each slot. `onSaved`
-// (optional) is called with the new config after a successful save, so the
-// caller can re-render without this module needing to know about the page.
-export function avatarCustomizer(currentConfig, onSaved) {
-  const cfg = { ...DEFAULT_AVATAR, ...(currentConfig || {}) };
-  const previewWrap = el('div', { style: 'display:flex;justify-content:center;margin-bottom:18px' });
+// The single call site every other module should use to show a user's
+// avatar: a real uploaded photo when set, else the SVG character builder.
+// `profile` is a profiles row (or a partial object with `.avatar_url`/`.avatar`).
+export function renderAvatar(profile, opts = {}) {
+  const size = opts.size || 96;
+  if (profile?.avatar_url) {
+    const img = document.createElement('img');
+    img.src = profile.avatar_url;
+    img.alt = '';
+    img.className = 'avatar-photo';
+    img.style.width = size + 'px';
+    img.style.height = size + 'px';
+    return img;
+  }
+  return renderAvatarSVG(profile?.avatar, opts);
+}
+
+// A modal with a photo upload + a live preview/chip-row builder for the SVG
+// character (used as the fallback whenever no photo is set). `profile` is
+// the full profiles row (needs both `.avatar` and `.avatar_url`). `onSaved`
+// (optional) is called after a successful save, so the caller can re-render
+// without this module needing to know about the page.
+export function avatarCustomizer(profile, onSaved) {
+  const cfg = { ...DEFAULT_AVATAR, ...(profile?.avatar || {}) };
+  let photoUrl = profile?.avatar_url || null;
+  const previewWrap = el('div', { style: 'display:flex;justify-content:center;margin-bottom:14px' });
 
   function refreshPreview() {
     previewWrap.innerHTML = '';
-    previewWrap.append(renderAvatarSVG(cfg, { size: 140 }));
+    if (photoUrl) {
+      const img = document.createElement('img');
+      img.src = photoUrl;
+      img.alt = '';
+      img.style.cssText = 'width:140px;height:140px;border-radius:50%;object-fit:cover';
+      previewWrap.append(img);
+    } else {
+      previewWrap.append(renderAvatarSVG(cfg, { size: 140 }));
+    }
   }
   refreshPreview();
+
+  const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
+  const photoErr = el('p', { class: 'form-error', hidden: true });
+  const uploadBtn = el('button', {
+    type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => fileInput.click()
+  }, '📷 Upload photo');
+  const removeBtn = el('button', {
+    type: 'button', class: 'btn btn-sm btn-ghost', hidden: !photoUrl,
+    onClick: async () => {
+      try {
+        await removeAvatarPhoto();
+        photoUrl = null;
+        refreshPreview();
+        removeBtn.hidden = true;
+        toast('Photo removed — showing your character', 'ok');
+        onSaved?.();
+      } catch (ex) {
+        toast(ex.message || 'Failed to remove', 'err');
+      }
+    }
+  }, '🗑️ Remove photo');
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    photoErr.hidden = true;
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Uploading…';
+    try {
+      photoUrl = await uploadAvatarPhoto(file);
+      refreshPreview();
+      removeBtn.hidden = false;
+      toast('Photo uploaded', 'ok');
+      onSaved?.();
+    } catch (ex) {
+      photoErr.textContent = ex.message || 'Upload failed.';
+      photoErr.hidden = false;
+    } finally {
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = '📷 Upload photo';
+      fileInput.value = '';
+    }
+  });
 
   function slotRow(label, options, key) {
     const chipsWrap = el('div', { class: 'ex-chip-row' });
@@ -174,6 +266,10 @@ export function avatarCustomizer(currentConfig, onSaved) {
   openModal(el('div', {}, [
     el('h3', {}, 'Customize avatar'),
     previewWrap,
+    el('div', { class: 'row', style: 'justify-content:center;gap:8px;margin-bottom:6px' }, [uploadBtn, removeBtn]),
+    fileInput,
+    photoErr,
+    el('div', { class: 'section-head', style: 'margin:14px 2px 2px' }, [el('h2', {}, 'Or build a character')]),
     slotRow('Background', AVATAR_PARTS.backgrounds, 'bg'),
     slotRow('Skin tone', AVATAR_PARTS.skins, 'skin'),
     slotRow('Hair', AVATAR_PARTS.hair, 'hair'),

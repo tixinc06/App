@@ -12,15 +12,17 @@ import {
   skeleton, staggerChildren, countUp, celebrate, todayISO, isoOf
 } from './ui.js';
 import { loadProgress, xpToNext, maxLevelForTrack, prestige } from './progression.js';
-import { MAX_PRESTIGE, SHOP_ITEMS, PRESTIGE_TITLES, MASTER_TITLE } from './gamedata.js';
+import { MAX_PRESTIGE, SHOP_ITEMS, PRESTIGE_TITLES, MASTER_TITLE, weekendEventMsLeft } from './gamedata.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, loadAchievementsView } from './achievements.js';
 import { loadQuestProgress, claimQuest } from './quests.js';
 import { loadOwnProfile } from './profile.js';
 import { loadOverallRank, rankBadge } from './ranks.js';
-import { renderAvatarSVG, avatarCustomizer } from './avatar.js';
+import { renderAvatar, avatarCustomizer } from './avatar.js';
 import { isMuted, toggleMuted } from './sound.js';
 import { goToSegment } from './fitness.js';
+import { loadShopState, equipTheme, equipBanner, activateOwnedBooster } from './shop.js';
+import { renderWeightPlanner } from './tdee.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -91,6 +93,8 @@ export async function renderProgress(container, root) {
   }
   container.innerHTML = '';
 
+  const eventBanner = weekendEventBanner();
+  if (eventBanner) container.append(eventBanner);
   container.append(statusHeader(progress, streak));
   container.append(heroBanner(profile, progress, bannerGradient, overallRank, container, root));
   container.append(el('button', {
@@ -109,6 +113,8 @@ async function renderSubView(container, root) {
     else if (profileView === 'goals') await renderGoalsView(container, root);
     else if (profileView === 'prs') await renderPRsView(container, root);
     else if (profileView === 'achievements') await renderAchievementsSubView(container, root);
+    else if (profileView === 'inventory') await renderInventoryView(container, root);
+    else if (profileView === 'weight-planner') await renderWeightPlannerSubView(container, root);
     else { profileView = 'hub'; return renderProgress(container, root); }
   } catch (ex) {
     container.innerHTML = '';
@@ -172,6 +178,90 @@ async function renderPRsView(container, root) {
   }
 }
 
+async function renderWeightPlannerSubView(container, root) {
+  container.innerHTML = '';
+  container.append(backHeader('Weight planner', container, root));
+  const body = el('div');
+  container.append(body);
+  await renderWeightPlanner(body, root);
+}
+
+// ── Inventory (owned themes, banners, boosters) ─────────────────────────────
+async function renderInventoryView(container, root) {
+  const state = await loadShopState();
+  container.innerHTML = '';
+  container.append(backHeader('Inventory', container, root));
+
+  const ownedThemes = state.inventory.filter(i => i.item_type === 'theme');
+  const ownedBanners = state.inventory.filter(i => i.item_type === 'banner');
+  const ownedBoosters = state.inventory.filter(i => i.item_type === 'booster');
+  const activeBooster = state.settings?.active_booster;
+  const activeLive = activeBooster && new Date(activeBooster.expires_at) > new Date();
+
+  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Themes')]));
+  if (!ownedThemes.length) {
+    container.append(emptyState('🎨', 'No purchased themes yet — the Shop has more.'));
+  } else {
+    const list = el('div', { class: 'list', style: 'margin-bottom:20px' }, ownedThemes.map(i => {
+      const t = SHOP_ITEMS.themes.find(x => x.code === i.item_code);
+      if (!t) return null;
+      const equipped = (state.settings?.equipped_theme || 'default') === t.code;
+      return el('div', { class: 'card item' }, [
+        el('div', { class: 'thumb', style: `background:${t.colors.primary}` }, '🎨'),
+        el('div', { class: 'grow' }, [el('div', { class: 'title' }, t.name)]),
+        equipped
+          ? el('span', { class: 'pill sold' }, 'Equipped')
+          : el('button', { class: 'btn btn-sm btn-primary', onClick: () => equipTheme(t, () => renderInventoryView(container, root)) }, 'Equip')
+      ]);
+    }).filter(Boolean));
+    staggerChildren(list);
+    container.append(list);
+  }
+
+  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Banners')]));
+  if (!ownedBanners.length) {
+    container.append(emptyState('🏳️', 'No purchased banners yet — the Shop has more.'));
+  } else {
+    const list = el('div', { class: 'list', style: 'margin-bottom:20px' }, ownedBanners.map(i => {
+      const b = SHOP_ITEMS.banners.find(x => x.code === i.item_code);
+      if (!b) return null;
+      const equipped = state.settings?.equipped_banner === b.code;
+      return el('div', { class: 'card item' }, [
+        el('div', { class: 'thumb', style: `background:${b.gradient}` }, ''),
+        el('div', { class: 'grow' }, [el('div', { class: 'title' }, b.name)]),
+        equipped
+          ? el('span', { class: 'pill sold' }, 'Equipped')
+          : el('button', { class: 'btn btn-sm btn-primary', onClick: () => equipBanner(b, () => renderInventoryView(container, root)) }, 'Equip')
+      ]);
+    }).filter(Boolean));
+    staggerChildren(list);
+    container.append(list);
+  }
+
+  container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Boosters')]));
+  if (!ownedBoosters.length) {
+    container.append(emptyState('⚡', 'No boosters owned — buy some from the Shop.'));
+  } else {
+    const list = el('div', { class: 'list' }, ownedBoosters.map(i => {
+      const b = SHOP_ITEMS.boosters.find(x => x.code === i.item_code);
+      if (!b) return null;
+      return el('div', { class: 'card item' }, [
+        el('div', { class: 'thumb' }, '⚡'),
+        el('div', { class: 'grow' }, [
+          el('div', { class: 'title' }, b.name),
+          el('div', { class: 'sub' }, `${b.multiplier}× XP for ${b.durationMinutes} min · Own ${i.quantity}`)
+        ]),
+        el('button', {
+          class: 'btn btn-sm btn-ghost', disabled: activeLive,
+          onClick: () => activateOwnedBooster(b, () => renderInventoryView(container, root))
+        }, activeLive ? 'Active…' : 'Activate')
+      ]);
+    }).filter(Boolean));
+    staggerChildren(list);
+    container.append(list);
+  }
+}
+
 async function renderAchievementsSubView(container, root) {
   const progress = await loadProgress();
   const workouts = await loadOwnWorkoutDates();
@@ -184,6 +274,21 @@ async function renderAchievementsSubView(container, root) {
   const achList = el('div', { class: 'list' }, achievementsView.map(achievementRow));
   staggerChildren(achList);
   container.append(achList);
+}
+
+// ── Weekend event banner ─────────────────────────────────────────────────────
+function weekendEventBanner() {
+  const msLeft = weekendEventMsLeft();
+  if (msLeft == null) return null;
+  const totalMins = Math.max(1, Math.round(msLeft / 60000));
+  const hours = Math.floor(totalMins / 60), mins = totalMins % 60;
+  const label = hours >= 24
+    ? `${Math.ceil(hours / 24)}d left`
+    : `${hours}h ${mins}m left`;
+  return el('div', { class: 'card weekend-event-banner' }, [
+    el('div', { style: 'font-weight:800' }, '⚡ Double XP & Plates all weekend'),
+    el('div', { class: 'dim', style: 'font-size:12px;margin-top:2px' }, label)
+  ]);
 }
 
 // ── Status header (Lv/XP · streak · Plates) ─────────────────────────────────
@@ -239,7 +344,7 @@ function heroBanner(profile, progress, bannerGradient, overallRank, container, r
       ]),
       rankBadge(overallRank)
     ]),
-    el('div', { class: 'profile-hero-avatar-wrap' }, [renderAvatarSVG(profile?.avatar, { size: 150 })]),
+    el('div', { class: 'profile-hero-avatar-wrap' }, [renderAvatar(profile, { size: 150 })]),
     el('div', { class: 'row', style: 'justify-content:center;gap:8px;margin-top:4px' }, [
       el('button', {
         type: 'button', class: 'btn btn-sm btn-ghost profile-customize-btn',
@@ -254,7 +359,7 @@ function heroBanner(profile, progress, bannerGradient, overallRank, container, r
 }
 
 function openAvatarCustomizer(profile, container, root) {
-  avatarCustomizer(profile?.avatar, () => renderProgress(container, root));
+  avatarCustomizer(profile, () => renderProgress(container, root));
 }
 
 function doPrestige(container, root) {
@@ -279,6 +384,8 @@ function shortcutGrid(profile, container, root) {
     { icon: '🎯', label: 'Goals', onClick: () => goProfileView('goals', container, root) },
     { icon: '🏆', label: 'Records', onClick: () => goProfileView('prs', container, root) },
     { icon: '🎖️', label: 'Medals', onClick: () => goProfileView('achievements', container, root) },
+    { icon: '🎒', label: 'Inventory', onClick: () => goProfileView('inventory', container, root) },
+    { icon: '⚖️', label: 'Weight planner', onClick: () => goProfileView('weight-planner', container, root) },
     { icon: '🏅', label: 'Ranks', onClick: () => goToSegment('ranks', root) },
     { icon: '🛒', label: 'Shop', onClick: () => goToSegment('shop', root) },
     { icon: '🗓️', label: 'Routines', onClick: () => goToSegment('train', root) },

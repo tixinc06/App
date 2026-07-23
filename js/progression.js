@@ -101,6 +101,15 @@ export async function award(events) {
     }
   } catch { /* no booster available */ }
 
+  // Weekend event: applied AFTER any booster, so a 2x booster during the
+  // Fri-Sun window compounds to 4x XP (Plates only ever get the flat 2x —
+  // boosters are XP-only by design).
+  const eventApplied = GD.isDoubleWeekend();
+  if (eventApplied) {
+    xpGain = Math.round(xpGain * 2);
+    platesGain = Math.round(platesGain * 2);
+  }
+
   const updatePayload = {
     xp: Number(progress.xp) + xpGain,
     plates: Number(progress.plates) + platesGain,
@@ -117,7 +126,7 @@ export async function award(events) {
   if (error) throw error;
 
   const rolled = await rollLevels(data);
-  return { xpGain, platesGain, labels, levelsGained: rolled.levelsGained, progress: rolled.progress, boosterApplied };
+  return { xpGain, platesGain, labels, levelsGained: rolled.levelsGained, progress: rolled.progress, boosterApplied, eventApplied };
 }
 
 // Manual prestige — only allowed once the level cap (55) is reached on the

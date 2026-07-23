@@ -57,6 +57,25 @@ export const SHOP_ITEMS = {
   ]
 };
 
+// ── Weekend event ────────────────────────────────────────────────────────────
+// Double XP & Plates, Friday through Sunday (device-local clock — correct for
+// a UK-based user base, consistent with the app's client-side award model).
+export function isDoubleWeekend(d = new Date()) {
+  const day = d.getDay(); // 0=Sun, 5=Fri, 6=Sat
+  return day === 0 || day === 5 || day === 6;
+}
+
+// Ms remaining until the event ends (end of Sunday, local time), or null if
+// the event isn't currently live. Used for the countdown banner.
+export function weekendEventMsLeft(d = new Date()) {
+  if (!isDoubleWeekend(d)) return null;
+  const daysUntilSunEnd = (7 - d.getDay()) % 7; // Sun=0, Fri=5->2, Sat=6->1
+  const end = new Date(d);
+  end.setDate(d.getDate() + daysUntilSunEnd);
+  end.setHours(23, 59, 59, 999);
+  return Math.max(0, end - d);
+}
+
 // ── Streaks ──────────────────────────────────────────────────────────────────
 // A streak freeze protects one missed training WEEK from breaking your streak
 // (js/streaks.js). Bought individually — you can stack several.

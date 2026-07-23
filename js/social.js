@@ -17,11 +17,12 @@ import {
   loadOwnProfile, claimUsername, updateDisplayName, searchProfiles,
   loadFriendships, otherIdOf, sendFriendRequest, respondFriendRequest, removeFriendship
 } from './profile.js';
-import { renderAvatarSVG } from './avatar.js';
+import { renderAvatar } from './avatar.js';
+import { renderConversations, openConversation, loadUnreadCount } from './messages.js';
 
-function avatarThumb(avatarConfig, size = 46) {
+function avatarThumb(profile, size = 46) {
   const wrap = el('div', { class: 'thumb avatar-thumb' });
-  wrap.append(renderAvatarSVG(avatarConfig, { size }));
+  wrap.append(renderAvatar(profile, { size }));
   return wrap;
 }
 
@@ -68,7 +69,7 @@ export async function renderFriends(container, root) {
 
   container.append(el('div', { class: 'card', style: 'padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between' }, [
     el('div', { style: 'display:flex;align-items:center;gap:12px' }, [
-      avatarThumb(profile.avatar, 44),
+      avatarThumb(profile, 44),
       el('div', {}, [
         el('div', { class: 'dim', style: 'font-size:11px;text-transform:uppercase;font-weight:600' }, 'You'),
         el('div', { style: 'font-weight:700' }, '@' + profile.username)
@@ -77,9 +78,11 @@ export async function renderFriends(container, root) {
     el('button', { class: 'btn btn-sm btn-ghost', onClick: () => editDisplayNameForm(profile, container, root) }, 'Edit name')
   ]));
 
+  const unread = await loadUnreadCount().catch(() => 0);
   const tabs = [
     { value: 'friends', label: `Friends (${data.accepted.length})` },
     { value: 'requests', label: `Requests${data.incoming.length ? ` (${data.incoming.length})` : ''}` },
+    { value: 'messages', label: `Messages${unread ? ` (${unread})` : ''}` },
     { value: 'leaderboard', label: 'Leaderboard' },
     { value: 'add', label: '＋ Add' }
   ];
@@ -95,6 +98,8 @@ export async function renderFriends(container, root) {
 
   if (friendsView === 'requests') {
     renderRequests(body, data, container, root);
+  } else if (friendsView === 'messages') {
+    renderConversations(body, root);
   } else if (friendsView === 'leaderboard') {
     renderLeaderboard(body, data);
   } else if (friendsView === 'add') {
@@ -162,11 +167,15 @@ function renderFriendsList(body, data, container, root) {
     const prof = data.profileById[oid];
     const prog = data.progressById[oid];
     return el('div', { class: 'card item', onClick: () => openFriendDetail(oid, prof, prog, container, root) }, [
-      avatarThumb(prof?.avatar),
+      avatarThumb(prof),
       el('div', { class: 'grow' }, [
         el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')),
         el('div', { class: 'sub' }, prof?.display_name || '')
       ]),
+      el('button', {
+        class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
+        onClick: e => { e.stopPropagation(); openConversation(oid, prof, null, root); }
+      }, '💬'),
       levelBadge(prog)
     ]);
   }));
@@ -180,7 +189,7 @@ function renderRequests(body, data, container, root) {
     const list = el('div', { class: 'list', style: 'margin-bottom:16px' }, data.incoming.map(f => {
       const prof = data.profileById[f.requester_id];
       return el('div', { class: 'card item' }, [
-        avatarThumb(prof?.avatar),
+        avatarThumb(prof),
         el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + (prof?.username || 'unknown'))]),
         el('div', { class: 'row', style: 'flex:0 0 auto;gap:6px' }, [
           el('button', { class: 'btn btn-sm btn-primary', onClick: () => respondRequest(f, true, container, root) }, 'Accept'),
@@ -196,7 +205,7 @@ function renderRequests(body, data, container, root) {
     const list = el('div', { class: 'list' }, data.outgoing.map(f => {
       const prof = data.profileById[f.addressee_id];
       return el('div', { class: 'card item' }, [
-        avatarThumb(prof?.avatar),
+        avatarThumb(prof),
         el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + (prof?.username || 'unknown')), el('div', { class: 'sub' }, 'Pending')]),
         el('button', { class: 'btn btn-sm btn-ghost', onClick: () => cancelRequest(f, container, root) }, 'Cancel')
       ]);
@@ -307,7 +316,7 @@ function renderAddFriend(body, data, container, root) {
       results.append(...matches.map(m => {
         const already = knownIds.has(m.user_id);
         return el('div', { class: 'card item' }, [
-          avatarThumb(m.avatar),
+          avatarThumb(m),
           el('div', { class: 'grow' }, [el('div', { class: 'title' }, '@' + m.username)]),
           already
             ? el('span', { class: 'pill' }, 'Already added')
@@ -349,10 +358,13 @@ async function openFriendDetail(oid, prof, prog, container, root) {
 
   const body = el('div', {}, [
     el('div', { style: 'display:flex;align-items:center;gap:12px' }, [
-      avatarThumb(prof?.avatar, 56),
+      avatarThumb(prof, 56),
       el('h3', { style: 'margin:0' }, '@' + (prof?.username || 'unknown'))
     ]),
-    el('div', { style: 'margin:10px 0 16px' }, [levelBadge(prog)]),
+    el('div', { style: 'margin:10px 0 16px;display:flex;align-items:center;gap:10px' }, [
+      levelBadge(prog),
+      el('button', { class: 'btn btn-sm btn-primary', onClick: () => { closeModal(); openConversation(oid, prof, null, root); } }, '💬 Message')
+    ]),
     el('div', { class: 'section-head' }, [el('h2', {}, 'Goals')]),
     openGoals.length
       ? el('div', { class: 'list', style: 'margin-bottom:16px' }, openGoals.map(g =>
