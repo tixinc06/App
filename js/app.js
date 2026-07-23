@@ -1,7 +1,7 @@
 // App bootstrap: config check, session handling, Home launcher + section routing,
 // view transitions, and gesture navigation (swipe-back, pull-to-refresh).
 import { IS_CONFIGURED } from './config.js';
-import { initSession, wireAuthScreen, logout } from './auth.js';
+import { initSession, wireAuthScreen, logout, getUid } from './auth.js';
 import { renderResell } from './resell.js';
 import { renderFood } from './food.js';
 import { renderFitness } from './fitness.js';
@@ -186,17 +186,46 @@ function usernameGateView() {
 
 // Checked right after showOnly('app'), before anything else mounts — a
 // banned user should never reach Home, the username gate, or any data
-// fetch beyond this one profile read. This is a UI convenience only: the
-// real ban enforcement is the DB trigger that stops a banned user clearing
-// their own `banned` flag (see migration-admin.sql) — this gate just makes
-// the ban actually stop them from using the app day to day.
+// fetch beyond this one profile read. This is a UI convenience layer: the
+// real, unbypassable ban enforcement is at the database — the trigger that
+// stops a banned user clearing their own `banned` flag (migration-admin.sql)
+// and the `is_banned()` RLS guard on write paths (migration-ban-enforcement.sql)
+// — this gate exists so the ban actually stops day-to-day app use too.
+//
+// FAILS CLOSED: a transient read failure retries briefly, then reports
+// { ok:false } rather than defaulting to "not banned" — the caller must
+// block on anything other than a confirmed banned:false. The earlier
+// version returned null (= not banned) on any error, which is exactly the
+// fail-open bug that let a banned user back in whenever the profile read
+// hung or rejected (most often from inside the auth-callback lock — see
+// js/auth.js's deferred onChange dispatch, the actual root-cause fix).
 async function checkBanned() {
-  try {
-    const profile = await loadOwnProfile();
-    return profile?.banned ? profile : null;
-  } catch {
-    return null; // best-effort — a transient load error shouldn't hard-lock the app
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const profile = await loadOwnProfile();
+      return { ok: true, banned: !!profile?.banned, profile };
+    } catch {
+      if (attempt < 2) await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
   }
+  return { ok: false };
+}
+
+function verifyFailedView() {
+  const container = document.getElementById('view');
+  document.getElementById('view-title').textContent = 'Connection issue';
+  document.getElementById('back-btn').hidden = true;
+  container.innerHTML = '';
+  container.append(el('div', { class: 'card', style: 'padding:24px;margin-top:20px;text-align:center' }, [
+    el('div', { style: 'font-size:34px;margin-bottom:10px' }, '⚠️'),
+    el('div', { style: 'font-weight:700;font-size:18px;margin-bottom:8px' }, "Couldn't verify your account"),
+    el('div', { class: 'muted', style: 'margin-bottom:16px' }, 'Check your connection and try again.'),
+    el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:10px', onClick: () => location.reload() }, 'Retry'),
+    el('button', {
+      class: 'btn btn-ghost btn-block',
+      onClick: async () => { try { await logout(); } catch (e) { toast(e.message || 'Could not log out', 'err'); } }
+    }, 'Log out')
+  ]));
 }
 
 function bannedView(reason) {
@@ -215,6 +244,12 @@ function bannedView(reason) {
   ]));
 }
 
+// Guards against a second auth event (e.g. TOKEN_REFRESHED firing while the
+// ban check from a prior SIGNED_IN event is still in flight) rendering the
+// app over an already-shown ban/verify-failed screen, or vice versa —
+// same pattern as js/home.js's homeGen.
+let sessionGen = 0;
+
 async function main() {
   if (!IS_CONFIGURED) {
     showOnly('setup-notice');
@@ -225,14 +260,15 @@ async function main() {
   wireGestures();
 
   await initSession(async session => {
+    const myGen = ++sessionGen;
     if (session) {
       showOnly('app');
-      const banned = await checkBanned();
-      if (banned) {
-        bannedView(banned.ban_reason);
-        return;
-      }
+      const result = await checkBanned();
+      if (myGen !== sessionGen) return; // superseded by a newer session event
+      if (!result.ok) { verifyFailedView(); return; }
+      if (result.banned) { bannedView(result.profile.ban_reason); return; }
       await ensureUsername();
+      if (myGen !== sessionGen) return;
       activeSection = null;
       renderActive('forward');
       loadAndApplyTheme();
@@ -240,6 +276,19 @@ async function main() {
     } else {
       showOnly('auth-screen');
     }
+  });
+
+  // Re-check on resume so a user banned mid-session is ejected without
+  // needing a refresh. Only acts on a CONFIRMED ban — a transient recheck
+  // failure here must not hard-lock an already-working session (unlike the
+  // initial gate above, which fails closed because nothing has been shown
+  // to trust yet).
+  document.addEventListener('visibilitychange', async () => {
+    if (document.hidden || !getUid()) return;
+    const myGen = ++sessionGen;
+    const result = await checkBanned();
+    if (myGen !== sessionGen || !result.ok) return;
+    if (result.banned) bannedView(result.profile.ban_reason);
   });
 }
 

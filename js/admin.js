@@ -9,7 +9,8 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, num, toast, formModal, actionSheet, emptyState, skeleton, staggerChildren
+  el, num, toast, formModal, confirmModal, actionSheet, emptyState, skeleton, staggerChildren,
+  openModal, closeModal
 } from './ui.js';
 import { loadOwnProfile, searchProfiles } from './profile.js';
 import { loadProgress } from './progression.js';
@@ -161,6 +162,7 @@ function userActions(m, container, root) {
   acts.push(m.banned
     ? { label: '✅ Unban', onClick: () => unbanUser(m, container, root) }
     : { label: '🚫 Ban', danger: true, onClick: () => banForm(m, container, root) });
+  acts.push({ label: '🗑️ Erase progress', danger: true, onClick: () => eraseForm(m, container, root) });
   actionSheet('@' + m.username, acts);
 }
 
@@ -202,4 +204,53 @@ async function unbanUser(m, container, root) {
   } catch (ex) {
     toast(ex.message || 'Failed', 'err');
   }
+}
+
+// ── Erase progress ──────────────────────────────────────────────────────────
+// Explicit, opt-in, per-area, irreversible. Never touches the profiles row —
+// username, avatar, and ban state all survive. Separate action from ban/unban
+// (which never touches data) — see admin_erase_user_data() in schema.sql.
+function eraseForm(m, container, root) {
+  const fitCb = el('input', { type: 'checkbox' });
+  const resellCb = el('input', { type: 'checkbox' });
+  const foodCb = el('input', { type: 'checkbox' });
+  const err = el('p', { class: 'form-error', hidden: true });
+  const btn = el('button', { class: 'btn btn-danger btn-block', style: 'margin-top:16px' }, 'Erase selected data');
+
+  btn.addEventListener('click', () => {
+    const wipeFitness = fitCb.checked, wipeReselling = resellCb.checked, wipeFood = foodCb.checked;
+    if (!wipeFitness && !wipeReselling && !wipeFood) {
+      err.textContent = 'Select at least one area.';
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    const areas = [wipeFitness && 'fitness', wipeReselling && 'reselling', wipeFood && 'food'].filter(Boolean).join(', ');
+    confirmModal({
+      title: 'Erase progress?',
+      message: `This permanently deletes @${m.username}'s ${areas} data. Their account, username, avatar, and ban status are not affected. This cannot be undone.`,
+      confirmText: 'Erase',
+      danger: true,
+      onConfirm: async () => {
+        const { error } = await sb.rpc('admin_erase_user_data', {
+          target: m.user_id, wipe_fitness: wipeFitness, wipe_reselling: wipeReselling, wipe_food: wipeFood
+        });
+        if (error) throw error;
+        toast(`Erased ${areas} data for @${m.username}`, 'ok');
+        closeModal();
+        renderAdmin(container, root);
+      }
+    });
+  });
+
+  openModal(el('div', {}, [
+    el('h3', {}, 'Erase @' + m.username + "'s progress"),
+    el('p', { class: 'muted', style: 'margin-bottom:14px' },
+      'Choose which areas to permanently wipe. This does not touch their account, username, avatar, or ban status.'),
+    el('label', { class: 'row', style: 'align-items:center;gap:8px' }, [fitCb, 'Fitness — workouts, PRs, XP, quests, achievements…']),
+    el('label', { class: 'row', style: 'align-items:center;gap:8px;margin-top:10px' }, [resellCb, 'Reselling — inventory, sales, goals, catalog…']),
+    el('label', { class: 'row', style: 'align-items:center;gap:8px;margin-top:10px' }, [foodCb, 'Food — library, logs']),
+    err,
+    btn
+  ]));
 }

@@ -582,3 +582,177 @@ CREATE POLICY "delete own products" ON product_catalog
 
 -- One-off bootstrap (run by hand once): promote yourself to admin —
 -- UPDATE profiles SET is_admin = true WHERE username = 'your_username_here';
+
+-- ── Divisional ranks: rank_score + global position lookup ───────────────────
+ALTER TABLE fitness_progress ADD COLUMN IF NOT EXISTS rank_score NUMERIC;
+
+-- Note: "position" is a reserved SQL keyword and can't be used bare as a
+-- RETURNS TABLE column name — hence rank_position/total_users instead.
+CREATE OR REPLACE FUNCTION global_rank_position()
+RETURNS TABLE(rank_position BIGINT, total_users BIGINT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+DECLARE
+  my_score NUMERIC;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT fp.rank_score INTO my_score FROM fitness_progress fp WHERE fp.user_id = auth.uid();
+  IF my_score IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    (SELECT COUNT(*)::BIGINT + 1 FROM fitness_progress fp2 WHERE fp2.rank_score > my_score) AS rank_position,
+    (SELECT COUNT(*)::BIGINT FROM fitness_progress fp3 WHERE fp3.rank_score IS NOT NULL) AS total_users;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION global_rank_position() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION global_rank_position() TO authenticated;
+
+-- ── DB-level ban enforcement — see migration-ban-enforcement.sql for the
+-- full explanation. A banned user can still see/delete their own existing
+-- rows but every INSERT/UPDATE below is rejected, even via a direct API call.
+CREATE OR REPLACE FUNCTION is_banned(uid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT COALESCE((SELECT banned FROM profiles WHERE user_id = uid), false);
+$$;
+REVOKE ALL ON FUNCTION is_banned(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_banned(UUID) TO authenticated;
+
+DROP POLICY IF EXISTS "send friend request" ON friendships;
+CREATE POLICY "send friend request" ON friendships
+  FOR INSERT WITH CHECK (auth.uid() = requester_id AND NOT is_banned(auth.uid()));
+
+DROP POLICY IF EXISTS "respond to friend request" ON friendships;
+CREATE POLICY "respond to friend request" ON friendships
+  FOR UPDATE USING (auth.uid() = addressee_id OR auth.uid() = requester_id)
+  WITH CHECK ((auth.uid() = addressee_id OR auth.uid() = requester_id) AND NOT is_banned(auth.uid()));
+
+DROP POLICY IF EXISTS "insert own products" ON product_catalog;
+CREATE POLICY "insert own products" ON product_catalog
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id AND (is_shared = false OR is_admin(auth.uid())) AND NOT is_banned(auth.uid())
+  );
+
+DROP POLICY IF EXISTS "update own products" ON product_catalog;
+CREATE POLICY "update own products" ON product_catalog
+  FOR UPDATE USING (auth.uid() = user_id OR is_admin(auth.uid()))
+  WITH CHECK (
+    (auth.uid() = user_id OR is_admin(auth.uid()))
+    AND (is_shared = false OR is_admin(auth.uid()))
+    AND NOT is_banned(auth.uid())
+  );
+
+DROP POLICY IF EXISTS "create duo_goals" ON duo_goals;
+CREATE POLICY "create duo_goals" ON duo_goals
+  FOR INSERT WITH CHECK (auth.uid() = requester_id AND NOT is_banned(auth.uid()));
+
+DROP POLICY IF EXISTS "respond duo_goals" ON duo_goals;
+CREATE POLICY "respond duo_goals" ON duo_goals
+  FOR UPDATE USING (auth.uid() = requester_id OR auth.uid() = addressee_id)
+  WITH CHECK ((auth.uid() = requester_id OR auth.uid() = addressee_id) AND NOT is_banned(auth.uid()));
+
+DROP POLICY IF EXISTS "own workout_templates" ON workout_templates;
+CREATE POLICY "select own workout_templates" ON workout_templates
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "insert own workout_templates" ON workout_templates
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "update own workout_templates" ON workout_templates
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "delete own workout_templates" ON workout_templates
+  FOR DELETE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own workouts" ON workouts;
+CREATE POLICY "select own workouts" ON workouts
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "insert own workouts" ON workouts
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "update own workouts" ON workouts
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "delete own workouts" ON workouts
+  FOR DELETE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own resell_items" ON resell_items;
+CREATE POLICY "select own resell_items" ON resell_items
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "insert own resell_items" ON resell_items
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "update own resell_items" ON resell_items
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "delete own resell_items" ON resell_items
+  FOR DELETE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own resell_sales" ON resell_sales;
+CREATE POLICY "select own resell_sales" ON resell_sales
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "insert own resell_sales" ON resell_sales
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "update own resell_sales" ON resell_sales
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id AND NOT is_banned(auth.uid()));
+CREATE POLICY "delete own resell_sales" ON resell_sales
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- ── Admin "erase progress" — explicit, opt-in per-area wipe, never touches
+-- the profiles row (username/avatar/ban state survive). See
+-- migration-admin-erase.sql for the full explanation.
+CREATE OR REPLACE FUNCTION admin_erase_user_data(
+  target UUID,
+  wipe_fitness BOOLEAN DEFAULT false,
+  wipe_reselling BOOLEAN DEFAULT false,
+  wipe_food BOOLEAN DEFAULT false
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT is_admin(auth.uid()) THEN
+    RAISE EXCEPTION 'Only an admin can erase user data.';
+  END IF;
+
+  IF wipe_fitness THEN
+    DELETE FROM fitness_progress WHERE user_id = target;
+    DELETE FROM workouts WHERE user_id = target;
+    DELETE FROM weight_entries WHERE user_id = target;
+    DELETE FROM personal_records WHERE user_id = target;
+    DELETE FROM fitness_goals WHERE user_id = target;
+    DELETE FROM achievements WHERE user_id = target;
+    DELETE FROM quest_claims WHERE user_id = target;
+    DELETE FROM streak_freeze_uses WHERE user_id = target;
+    DELETE FROM workout_templates WHERE user_id = target;
+    DELETE FROM splits WHERE user_id = target;
+    DELETE FROM custom_exercises WHERE user_id = target;
+  END IF;
+
+  IF wipe_reselling THEN
+    DELETE FROM resell_items WHERE user_id = target;
+    DELETE FROM resell_sales WHERE user_id = target;
+    DELETE FROM resell_expenses WHERE user_id = target;
+    DELETE FROM resell_goals WHERE user_id = target;
+    DELETE FROM duo_goals WHERE requester_id = target OR addressee_id = target;
+    DELETE FROM product_catalog WHERE user_id = target;
+  END IF;
+
+  IF wipe_food THEN
+    DELETE FROM foods WHERE user_id = target;
+    DELETE FROM food_logs WHERE user_id = target;
+  END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION admin_erase_user_data(UUID, BOOLEAN, BOOLEAN, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_erase_user_data(UUID, BOOLEAN, BOOLEAN, BOOLEAN) TO authenticated;

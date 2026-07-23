@@ -5,7 +5,7 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, toast, formModal, confirmModal, actionSheet, emptyState, skeleton, closeModal, openModal
+  el, toast, formModal, confirmModal, actionSheet, emptyState, skeleton, closeModal, openModal, makeReorderable
 } from './ui.js';
 import { workoutBuilder } from './fitness.js';
 import { attachExercisePicker } from './exercises.js';
@@ -186,14 +186,17 @@ function templateEditorModal(container, root, existing) {
   const exWrap = el('div');
   const rows = [];
 
-  function addRow(name = '', sets = 3, reps = 10) {
+  function addRow(name = '', sets = 0, reps = 10) {
     const nameInput = el('input', { placeholder: 'Exercise name', value: name, style: 'margin-top:0' });
     attachExercisePicker(nameInput);
-    const setsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', placeholder: 'sets', value: sets, style: 'margin-top:0' });
+    const setsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '0', placeholder: 'sets', value: sets, style: 'margin-top:0' });
     const repsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
     const rowObj = { nameInput, setsInput, repsInput };
     const node = el('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' }, [
-      nameInput,
+      el('div', { class: 'row', style: 'align-items:center' }, [
+        el('div', { class: 'drag-handle', title: 'Drag to reorder' }, '☰'),
+        el('div', { style: 'flex:1;min-width:0' }, [nameInput])
+      ]),
       el('div', { class: 'row', style: 'margin-top:8px;align-items:center' }, [
         setsInput, repsInput,
         el('button', {
@@ -206,6 +209,11 @@ function templateEditorModal(container, root, existing) {
     exWrap.append(node);
   }
 
+  makeReorderable(exWrap, {
+    handleSelector: '.drag-handle',
+    onReorder: (from, to) => { const [item] = rows.splice(from, 1); rows.splice(to, 0, item); }
+  });
+
   if (existing?.exercises?.length) { for (const e of existing.exercises) addRow(e.name, e.sets, e.reps); }
   else addRow();
 
@@ -215,7 +223,7 @@ function templateEditorModal(container, root, existing) {
 
   saveBtn.addEventListener('click', async () => {
     const exercises = rows
-      .map(r => ({ name: r.nameInput.value.trim(), sets: Number(r.setsInput.value) || 1, reps: Number(r.repsInput.value) || 1 }))
+      .map(r => ({ name: r.nameInput.value.trim(), sets: Number(r.setsInput.value) || 0, reps: Number(r.repsInput.value) || 1 }))
       .filter(e => e.name);
     if (!nameInput.value.trim()) { err.textContent = 'Give the template a name.'; err.hidden = false; return; }
     if (!exercises.length) { err.textContent = 'Add at least one exercise.'; err.hidden = false; return; }

@@ -283,6 +283,95 @@ function initRipples() {
 }
 initRipples();
 
+// ── Drag-to-reorder ──────────────────────────────────────────────────────────
+// Makes the direct children of `listEl` reorderable via a drag handle, built
+// on Pointer Events (not HTML5 drag-and-drop, which is unreliable on touch).
+// `handleSelector` finds the grip inside each item that starts a drag.
+// `onReorder(fromIndex, toIndex)` fires once, after the drop, so the caller
+// can reorder its own backing array to match the new DOM order.
+export function makeReorderable(listEl, { handleSelector = '.drag-handle', onReorder } = {}) {
+  let dragItem = null, items = [], rects = [], startIndex = 0, currentIndex = 0, startY = 0;
+
+  function reset() {
+    for (const it of items) { it.style.transform = ''; it.style.transition = ''; }
+    if (dragItem) {
+      dragItem.classList.remove('reorder-dragging');
+      dragItem.style.transform = ''; dragItem.style.transition = '';
+      dragItem.style.zIndex = ''; dragItem.style.position = '';
+    }
+    dragItem = null;
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+  }
+
+  function onDown(e) {
+    if (e.button != null && e.button !== 0) return;
+    const handle = e.target.closest(handleSelector);
+    if (!handle || !listEl.contains(handle)) return;
+    const item = [...listEl.children].find(c => c.contains(handle));
+    if (!item) return;
+    e.preventDefault();
+    items = [...listEl.children];
+    rects = items.map(it => it.getBoundingClientRect());
+    dragItem = item;
+    startIndex = items.indexOf(item);
+    currentIndex = startIndex;
+    startY = e.clientY;
+    dragItem.classList.add('reorder-dragging');
+    dragItem.style.position = 'relative';
+    dragItem.style.zIndex = '20';
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  }
+
+  function onMove(e) {
+    if (!dragItem) return;
+    const deltaY = e.clientY - startY;
+    dragItem.style.transition = 'none';
+    dragItem.style.transform = `translateY(${deltaY}px)`;
+
+    const dragHeight = rects[startIndex].height;
+    const dragMid = rects[startIndex].top + dragHeight / 2 + deltaY;
+
+    let newIndex = startIndex;
+    for (let i = 0; i < items.length; i++) {
+      if (i === startIndex) continue;
+      const mid = rects[i].top + rects[i].height / 2;
+      if (i < startIndex && dragMid < mid) newIndex = Math.min(newIndex, i);
+      else if (i > startIndex && dragMid > mid) newIndex = Math.max(newIndex, i);
+    }
+
+    if (newIndex !== currentIndex) {
+      currentIndex = newIndex;
+      for (let i = 0; i < items.length; i++) {
+        if (i === startIndex) continue;
+        const it = items[i];
+        it.style.transition = 'transform .15s ease';
+        if (currentIndex <= i && i < startIndex) it.style.transform = `translateY(${dragHeight}px)`;
+        else if (startIndex < i && i <= currentIndex) it.style.transform = `translateY(-${dragHeight}px)`;
+        else it.style.transform = '';
+      }
+    }
+  }
+
+  function onUp() {
+    if (!dragItem) return;
+    const finalIndex = currentIndex;
+    const item = dragItem;
+    reset();
+    if (finalIndex !== startIndex) {
+      const ref = items[finalIndex];
+      if (finalIndex < startIndex) listEl.insertBefore(item, ref);
+      else listEl.insertBefore(item, ref.nextSibling);
+      onReorder && onReorder(startIndex, finalIndex);
+    }
+  }
+
+  listEl.addEventListener('pointerdown', onDown);
+}
+
 // A segmented control: options = [{value,label}]. Calls onChange(value) when a
 // different segment is tapped. Returns the container node. The active segment
 // is highlighted by a sliding indicator pill that animates between positions.

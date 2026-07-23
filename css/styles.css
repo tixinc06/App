@@ -135,17 +135,44 @@ textarea{resize:vertical; min-height:70px}
   bottom:calc(150px + var(--safe-b)); z-index:55;
   display:flex; align-items:center; gap:12px;
   background:var(--card2); border:1px solid var(--border); border-radius:999px;
-  padding:8px 10px 8px 16px; box-shadow:var(--shadow);
+  padding:6px 10px 6px 6px; box-shadow:var(--shadow);
   max-width:calc(100% - 32px);
+  transition:box-shadow .3s ease;
 }
-.rt-label{font-size:13px; font-weight:700; white-space:nowrap}
-.rt-time{font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; min-width:46px; text-align:center}
+.rt-ring-wrap{position:relative; width:48px; height:48px; flex:0 0 auto}
+.rt-ring{width:48px; height:48px; transform:rotate(-90deg)}
+.rt-ring-track{fill:none; stroke:var(--bg2); stroke-width:4}
+.rt-ring-progress{fill:none; stroke:url(#rt-ring-grad); stroke-width:4; stroke-linecap:round;
+  transition:stroke-dashoffset .22s linear}
+.rt-grad-a{stop-color:var(--primary-soft)}
+.rt-grad-b{stop-color:var(--primary)}
+.rt-time{position:absolute; inset:0; display:grid; place-items:center;
+  font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px}
+.rt-label{font-size:13px; font-weight:700; white-space:nowrap; color:var(--muted)}
 .rt-actions{display:flex; gap:6px}
-.rt-actions .btn{padding:6px 10px; font-size:12px}
+.rt-icon-btn{padding:6px 10px; font-size:12px; font-weight:700}
+
+.rt-urgent{box-shadow:0 0 0 2px var(--red), var(--shadow); animation:rtPulse 1s ease-in-out infinite}
+.rt-urgent .rt-ring-progress{stroke:var(--red)}
+.rt-urgent .rt-time{color:var(--red)}
+@keyframes rtPulse{0%,100%{transform:translateX(-50%) scale(1)} 50%{transform:translateX(-50%) scale(1.035)}}
+
+.rt-finished-flash{
+  position:fixed; left:50%; top:calc(18px + var(--safe-t,0px)); transform:translate(-50%,-16px);
+  z-index:70; background:var(--card2); border:1px solid var(--border); border-radius:999px;
+  padding:10px 18px; font-weight:700; font-size:14px; box-shadow:var(--shadow);
+  opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none;
+}
+.rt-finished-flash.show{opacity:1; transform:translate(-50%,0)}
 
 .rt-picker{display:flex; align-items:center; gap:14px; justify-content:center; margin:8px 0 14px}
 .rt-picker-time{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; min-width:64px; text-align:center}
 .rt-picker .btn{width:36px; height:36px; padding:0; font-size:16px}
+
+@media (prefers-reduced-motion: reduce){
+  .rt-urgent{animation:none}
+  .rt-ring-progress{transition:none}
+}
 
 /* ── Exercise autocomplete dropdown ──────────────────────────────────────── */
 .exercise-dropdown{
@@ -163,6 +190,11 @@ textarea{resize:vertical; min-height:70px}
 .ex-group-tag{font-size:11px; color:var(--muted); flex:0 0 auto}
 .ex-save-custom{color:var(--primary-soft); font-weight:700}
 .ex-empty{padding:10px; font-size:13px; color:var(--muted); text-align:center}
+
+/* ── Drag-to-reorder ──────────────────────────────────────────────────────── */
+.drag-handle{flex:0 0 auto; width:30px; height:30px; display:grid; place-items:center;
+  color:var(--muted-dim); font-size:16px; cursor:grab; touch-action:none; user-select:none}
+.reorder-dragging{cursor:grabbing; box-shadow:var(--shadow); opacity:.96}
 
 /* ── Set-completion tick ──────────────────────────────────────────────────── */
 .set-tick{flex:0 0 auto; width:34px; height:34px; border-radius:50%;
@@ -288,12 +320,43 @@ textarea{resize:vertical; min-height:70px}
 .rank-gold{background:rgba(255,200,60,.18); color:#ffcf47}
 .rank-platinum{background:rgba(140,220,210,.18); color:#8cdcd2}
 .rank-diamond{background:rgba(90,200,255,.18); color:#5ac8ff}
-.rank-champion{background:rgba(155,107,255,.18); color:#b592ff}
-.rank-grand-champion{background:rgba(255,90,220,.18); color:#ff7ae0}
+.rank-champion{background:rgba(255,94,196,.18); color:#ff5ec4}
+.rank-grand-champion{background:rgba(255,59,59,.18); color:#ff3b3b}
 .rank-godly{background:linear-gradient(90deg,#ffd700,#ff8ae2,#5ac8ff,#ffd700);
   background-size:300% 100%; color:#0b0b12; animation:godlyShimmer 3s linear infinite}
 @keyframes godlyShimmer{from{background-position:0% 0}to{background-position:300% 0}}
 @media (prefers-reduced-motion: reduce){ .rank-godly{animation:none; background-position:0 0} }
+
+/* ── Rank tiles (emblem images / placeholder) + division pips ────────────── */
+.rank-tile{position:relative; border-radius:16px; overflow:hidden; flex-shrink:0;
+  background:var(--bg2); border:2px solid var(--rank-color, var(--border));
+  box-shadow:0 0 0 1px rgba(0,0,0,.3), 0 6px 16px -6px rgba(0,0,0,.5);
+  display:grid; place-items:center}
+.rank-tile-img{width:100%; height:100%; object-fit:cover; display:block}
+.rank-tile-placeholder{font-size:1.6em; opacity:.55}
+.rank-tile-locked{opacity:.4; filter:grayscale(.6)}
+.rank-tile-locked .rank-tile-img{filter:grayscale(1)}
+
+.rank-tile-godly{box-shadow:0 0 0 1px rgba(0,0,0,.3), 0 0 24px -2px rgba(255,215,0,.55)}
+.rank-tile-godly-ring{position:absolute; inset:-30%; z-index:0;
+  background:conic-gradient(from 0deg, #ffd700, #ff8ae2, #5ac8ff, #ffd700);
+  animation:godlyRingSpin 6s linear infinite}
+.rank-tile-godly .rank-tile-img,
+.rank-tile-godly .rank-tile-placeholder{position:relative; z-index:1; border-radius:12px}
+.rank-tile-godly .rank-tile-placeholder{width:78%; height:78%; display:grid; place-items:center;
+  background:var(--bg2)}
+@keyframes godlyRingSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){ .rank-tile-godly-ring{animation:none} }
+
+.rank-pip-row{display:flex; gap:4px; margin-top:6px}
+.rank-pip{width:9px; height:9px; border-radius:50%; background:var(--bg2); border:1px solid var(--border)}
+.rank-pip.lit{border-color:transparent}
+
+.rank-ladder-grid{display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:8px}
+.rank-ladder-card{display:flex; align-items:center; gap:14px; padding:12px 14px;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm)}
+.rank-ladder-locked{opacity:.55}
+.rank-ladder-name{font-weight:700; font-size:14px}
 
 /* ── Returned pill ────────────────────────────────────────────────────────── */
 .pill.returned{background:rgba(255,179,65,.14); color:var(--amber); margin-left:6px; vertical-align:middle}
@@ -306,6 +369,8 @@ textarea{resize:vertical; min-height:70px}
 .profile-lv-meter{margin-bottom:3px}
 .profile-lv-xp{font-size:11px; font-weight:600; color:var(--text)}
 .profile-status-stat{display:flex; align-items:center; gap:4px; font-size:15px; font-weight:800; flex:0 0 auto}
+.profile-mute-btn{flex:0 0 auto; width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
+  background:var(--bg2); color:var(--muted); font-size:14px; display:grid; place-items:center; cursor:pointer}
 
 .profile-hero{border-radius:var(--radius); padding:20px 18px 16px; margin-bottom:16px;
   box-shadow:var(--shadow); position:relative; overflow:hidden}
@@ -316,6 +381,9 @@ textarea{resize:vertical; min-height:70px}
 .profile-hero-avatar-wrap .avatar-svg{filter:drop-shadow(0 8px 18px rgba(0,0,0,.35))}
 .profile-customize-btn{background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.25); color:#fff}
 .profile-customize-btn:active{background:rgba(255,255,255,.2)}
+
+.profile-subview-head{justify-content:flex-start; gap:10px}
+.profile-subview-head h2{flex:1}
 
 .profile-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px}
 .profile-grid-tile{display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 6px;

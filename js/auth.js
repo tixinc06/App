@@ -12,7 +12,13 @@ export const getUid = () => _user?.id || null;
 export async function initSession(onChange) {
   sb.auth.onAuthStateChange((_event, session) => {
     _user = session?.user || null;
-    onChange(session);
+    // Deferred outside this callback: Supabase holds an internal auth lock
+    // for the duration of onAuthStateChange, so a .from()/.rpc() query
+    // issued directly from inside it (as onChange's ban check does) can
+    // hang or reject — a documented Supabase footgun that was the root
+    // cause of a banned user bypassing the suspended-screen gate on a
+    // TOKEN_REFRESHED/session event.
+    setTimeout(() => onChange(session), 0);
   });
   const { data: { session } } = await sb.auth.getSession();
   _user = session?.user || null;

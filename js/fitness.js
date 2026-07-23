@@ -9,11 +9,12 @@ import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
   el, num, fmtDate, todayISO, isoOf, toast, formModal, confirmModal, actionSheet,
-  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp, segmented, celebrate
+  emptyState, openModal, closeModal, skeleton, staggerChildren, countUp, segmented, celebrate,
+  makeReorderable
 } from './ui.js';
 import { lineChart, barChart, chartCard } from './charts.js';
 import { renderTrain } from './workouts.js';
-import { renderProgress } from './progress.js';
+import { renderProgress, resetProfileView } from './progress.js';
 import { renderRanks } from './ranks.js';
 import { renderShop } from './shop.js';
 import { renderFriends } from './social.js';
@@ -22,6 +23,7 @@ import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
 import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
 import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
+import { playSound } from './sound.js';
 
 let fitSegment = 'profile'; // 'profile' | 'train' | 'ranks' | 'shop' | 'friends'
 
@@ -29,6 +31,7 @@ let fitSegment = 'profile'; // 'profile' | 'train' | 'ranks' | 'shop' | 'friends
 // a different sub-tab without needing to import/mutate module-private state
 // directly — e.g. goToSegment('ranks', root) from the Profile hub's grid.
 export function goToSegment(seg, root) {
+  if (seg !== 'profile') resetProfileView();
   fitSegment = seg;
   renderFitness(root);
 }
@@ -41,7 +44,7 @@ export async function renderFitness(root) {
     { value: 'ranks', label: 'Ranks' },
     { value: 'shop', label: 'Shop' },
     { value: 'friends', label: 'Friends' }
-  ], fitSegment, v => { fitSegment = v; renderFitness(root); }));
+  ], fitSegment, v => { if (v !== 'profile') resetProfileView(); fitSegment = v; renderFitness(root); }));
 
   const body = el('div');
   root.append(body);
@@ -269,7 +272,7 @@ export function workoutBuilder(root, prefill) {
   let restSeconds = loadLastDuration();
   const startedAt = Date.now();
 
-  function addExercise(initialName = '', initialSets = 1) {
+  function addExercise(initialName = '', initialSets = 0) {
     const setsWrap = el('div', { style: 'margin:8px 0 0' });
     const sets = [];
     const nameInput = el('input', { placeholder: 'Exercise name', value: initialName, style: 'margin-top:0' });
@@ -302,7 +305,7 @@ export function workoutBuilder(root, prefill) {
         onClick: () => {
           rowObj.ticked = !rowObj.ticked;
           tickBtn.classList.toggle('ticked', rowObj.ticked);
-          if (rowObj.ticked) startRestTimer(restSeconds);
+          if (rowObj.ticked) { playSound('set_done'); startRestTimer(restSeconds); }
         }
       }, '✓');
       const row = el('div', { class: 'row', style: 'margin-bottom:8px;align-items:center' }, [
@@ -315,11 +318,12 @@ export function workoutBuilder(root, prefill) {
       sets.push(rowObj);
       setsWrap.append(row);
     }
-    for (let i = 0; i < Math.max(1, initialSets); i++) addSet();
+    for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
 
     const exObj = { nameInput, sets };
     const node = el('div', { class: 'card', style: 'padding:14px;margin-bottom:12px' }, [
       el('div', { class: 'row', style: 'align-items:center' }, [
+        el('div', { class: 'drag-handle', title: 'Drag to reorder' }, '☰'),
         nameWrap,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-danger', style: 'flex:0 0 auto',
@@ -333,6 +337,11 @@ export function workoutBuilder(root, prefill) {
     state.push(exObj);
     exWrap.append(node);
   }
+
+  makeReorderable(exWrap, {
+    handleSelector: '.drag-handle',
+    onReorder: (from, to) => { const [item] = state.splice(from, 1); state.splice(to, 0, item); }
+  });
 
   if (prefill?.exercises?.length) {
     for (const ex of prefill.exercises) addExercise(ex.name, ex.sets);
@@ -383,12 +392,12 @@ export function workoutBuilder(root, prefill) {
       // out for it, since award() refuses to grant XP during cooldown.
       // Skipping everything defers detection cleanly to the next
       // non-cooldown save — zero data loss, no burned rewards.
-      let gains = null, cooldownUntil = null;
+      let gains = null, cooldownUntil = null, prEvents = [];
       try {
         cooldownUntil = await isOnCooldown();
         if (!cooldownUntil) {
           const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
-          const prEvents = await detectAndSavePRs(exercises);
+          prEvents = await detectAndSavePRs(exercises);
           const goalEvents = await checkGoals();
           gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
         }
@@ -402,7 +411,8 @@ export function workoutBuilder(root, prefill) {
         if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
         if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
         toast(bits.join(' · '), 'ok');
-        if (gains.levelsGained > 0) celebrate();
+        if (gains.levelsGained > 0) { celebrate(); playSound('level_up'); }
+        else if (prEvents.length) playSound('pr');
       } else {
         toast('Workout saved 💪', 'ok');
       }

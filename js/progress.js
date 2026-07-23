@@ -19,7 +19,8 @@ import { loadQuestProgress, claimQuest } from './quests.js';
 import { loadOwnProfile } from './profile.js';
 import { loadOverallRank, rankBadge } from './ranks.js';
 import { renderAvatarSVG, avatarCustomizer } from './avatar.js';
-import { goToSegment, workoutBuilder } from './fitness.js';
+import { isMuted, toggleMuted } from './sound.js';
+import { goToSegment } from './fitness.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -49,19 +50,38 @@ async function loadOwnWorkoutDates() {
   return data || [];
 }
 
+// Drill-in state: which sub-view the Profile tab is showing. 'hub' is the
+// compact landing screen; the rest are full-screen sections reached from the
+// shortcut grid, each with their own back control.
+let profileView = 'hub';
+
+export function resetProfileView() {
+  profileView = 'hub';
+}
+
+function goProfileView(view, container, root) {
+  profileView = view;
+  renderProgress(container, root);
+}
+
+function backHeader(title, container, root) {
+  return el('div', { class: 'section-head profile-subview-head' }, [
+    el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => goProfileView('hub', container, root) }, '‹ Back'),
+    el('h2', {}, title)
+  ]);
+}
+
 export async function renderProgress(container, root) {
+  if (profileView !== 'hub') return renderSubView(container, root);
+
   container.innerHTML = '';
   container.append(skeleton(1, 'block'), skeleton(4, 'item'));
-  let progress, extras, bannerGradient, streak, achievementsView, questsView, profile, overallRank, workouts;
+  let progress, bannerGradient, streak, profile, overallRank, workouts;
   try {
     progress = await loadProgress();
-    extras = await loadExtras();
     bannerGradient = await loadBannerGradient();
     workouts = await loadOwnWorkoutDates();
     streak = await computeStreak(workouts);
-    const stats = await loadStats(progress, streak.current);
-    achievementsView = await loadAchievementsView(stats);
-    questsView = await loadQuestProgress(workouts, extras.prs, extras.goals);
     profile = await loadOwnProfile();
     overallRank = await loadOverallRank().catch(() => null);
   } catch (ex) {
@@ -71,8 +91,6 @@ export async function renderProgress(container, root) {
   }
   container.innerHTML = '';
 
-  const onCooldown = !!(progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date());
-
   container.append(statusHeader(progress, streak));
   container.append(heroBanner(profile, progress, bannerGradient, overallRank, container, root));
   container.append(el('button', {
@@ -81,17 +99,46 @@ export async function renderProgress(container, root) {
   }, '👥 Add Friends'));
   container.append(shortcutGrid(profile, container, root));
   container.append(memoriesCard(workouts));
+}
 
-  container.append(el('div', { class: 'section-head', id: 'profile-quests' }, [el('h2', {}, 'Weekly quests')]));
-  const questList = el('div', { class: 'list', style: 'margin-bottom:22px' }, questsView.quests.map(q => questRow(q, questsView.weekStart, onCooldown, container, root)));
+async function renderSubView(container, root) {
+  container.innerHTML = '';
+  container.append(skeleton(1, 'block'), skeleton(4, 'item'));
+  try {
+    if (profileView === 'quests') await renderQuestsView(container, root);
+    else if (profileView === 'goals') await renderGoalsView(container, root);
+    else if (profileView === 'prs') await renderPRsView(container, root);
+    else if (profileView === 'achievements') await renderAchievementsSubView(container, root);
+    else { profileView = 'hub'; return renderProgress(container, root); }
+  } catch (ex) {
+    container.innerHTML = '';
+    container.append(backHeader('Error', container, root));
+    container.append(emptyState('⚠️', 'Could not load. ' + (ex.message || '')));
+  }
+}
+
+async function renderQuestsView(container, root) {
+  const progress = await loadProgress();
+  const extras = await loadExtras();
+  const workouts = await loadOwnWorkoutDates();
+  const questsView = await loadQuestProgress(workouts, extras.prs, extras.goals);
+  const onCooldown = !!(progress.xp_cooldown_until && new Date(progress.xp_cooldown_until) > new Date());
+
+  container.innerHTML = '';
+  container.append(backHeader('Weekly quests', container, root));
+  const questList = el('div', { class: 'list' }, questsView.quests.map(q => questRow(q, questsView.weekStart, onCooldown, container, root)));
   staggerChildren(questList);
   container.append(questList);
+}
 
-  const { prs, goals } = extras;
+async function renderGoalsView(container, root) {
+  const { prs, goals } = await loadExtras();
   const openGoals = goals.filter(g => !g.achieved);
   const achievedGoals = goals.filter(g => g.achieved);
 
-  container.append(el('div', { class: 'section-head', id: 'profile-goals' }, [
+  container.innerHTML = '';
+  container.append(el('div', { class: 'section-head profile-subview-head' }, [
+    el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => goProfileView('hub', container, root) }, '‹ Back'),
     el('h2', {}, 'Goals'),
     el('button', { class: 'link', onClick: () => addGoalForm(container, root) }, '＋ Add goal')
   ]));
@@ -110,8 +157,12 @@ export async function renderProgress(container, root) {
       container.append(list);
     }
   }
+}
 
-  container.append(el('div', { class: 'section-head', style: 'margin-top:22px' }, [el('h2', {}, 'Personal records')]));
+async function renderPRsView(container, root) {
+  const { prs } = await loadExtras();
+  container.innerHTML = '';
+  container.append(backHeader('Personal records', container, root));
   if (!prs.length) {
     container.append(emptyState('🏆', 'Log workouts to start tracking PRs.'));
   } else {
@@ -119,8 +170,17 @@ export async function renderProgress(container, root) {
     staggerChildren(list);
     container.append(list);
   }
+}
 
-  container.append(el('div', { class: 'section-head', style: 'margin-top:22px', id: 'profile-achievements' }, [el('h2', {}, 'Achievements')]));
+async function renderAchievementsSubView(container, root) {
+  const progress = await loadProgress();
+  const workouts = await loadOwnWorkoutDates();
+  const streak = await computeStreak(workouts);
+  const stats = await loadStats(progress, streak.current);
+  const achievementsView = await loadAchievementsView(stats);
+
+  container.innerHTML = '';
+  container.append(backHeader('Achievements', container, root));
   const achList = el('div', { class: 'list' }, achievementsView.map(achievementRow));
   staggerChildren(achList);
   container.append(achList);
@@ -148,11 +208,20 @@ function statusHeader(progress, streak) {
       el('span', {}, '🔥'), el('span', {}, String(streak.current)),
       streak.freezesLeft > 0 ? el('span', { class: 'dim', style: 'font-size:11px;margin-left:1px' }, `🧊${streak.freezesLeft}`) : null
     ]),
-    el('div', { class: 'profile-status-stat' }, [el('span', {}, '💠'), plateEl])
+    el('div', { class: 'profile-status-stat' }, [el('span', {}, '💠'), plateEl]),
+    muteToggle()
   ]);
   countUp(xpValEl, Number(progress.xp), num);
   countUp(plateEl, Number(progress.plates), num);
   return row;
+}
+
+function muteToggle() {
+  const btn = el('button', {
+    type: 'button', class: 'profile-mute-btn', title: isMuted() ? 'Unmute sounds' : 'Mute sounds',
+    onClick: () => { const muted = toggleMuted(); btn.textContent = muted ? '🔇' : '🔊'; btn.title = muted ? 'Unmute sounds' : 'Mute sounds'; }
+  }, isMuted() ? '🔇' : '🔊');
+  return btn;
 }
 
 // ── Hero banner (avatar + username + title + rank) ──────────────────────────
@@ -168,7 +237,7 @@ function heroBanner(profile, progress, bannerGradient, overallRank, container, r
         el('div', { class: 'profile-hero-username' }, '@' + (profile?.username || '—')),
         el('div', { class: 'profile-hero-title' }, title)
       ]),
-      rankBadge(overallRank?.tier)
+      rankBadge(overallRank)
     ]),
     el('div', { class: 'profile-hero-avatar-wrap' }, [renderAvatarSVG(profile?.avatar, { size: 150 })]),
     el('div', { class: 'row', style: 'justify-content:center;gap:8px;margin-top:4px' }, [
@@ -204,20 +273,16 @@ function doPrestige(container, root) {
 }
 
 // ── Shortcut grid ─────────────────────────────────────────────────────────
-function scrollToId(id) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
 function shortcutGrid(profile, container, root) {
   const items = [
-    { icon: '✎', label: 'Customize', onClick: () => openAvatarCustomizer(profile, container, root) },
+    { icon: '📜', label: 'Quests', onClick: () => goProfileView('quests', container, root) },
+    { icon: '🎯', label: 'Goals', onClick: () => goProfileView('goals', container, root) },
+    { icon: '🏆', label: 'Records', onClick: () => goProfileView('prs', container, root) },
+    { icon: '🎖️', label: 'Medals', onClick: () => goProfileView('achievements', container, root) },
     { icon: '🏅', label: 'Ranks', onClick: () => goToSegment('ranks', root) },
     { icon: '🛒', label: 'Shop', onClick: () => goToSegment('shop', root) },
-    { icon: '📜', label: 'Quests', onClick: () => scrollToId('profile-quests') },
-    { icon: '🎖️', label: 'Medals', onClick: () => scrollToId('profile-achievements') },
     { icon: '🗓️', label: 'Routines', onClick: () => goToSegment('train', root) },
-    { icon: '▶', label: 'Quick log', onClick: () => workoutBuilder(root) },
-    { icon: '🎯', label: 'Goals', onClick: () => scrollToId('profile-goals') }
+    { icon: '✎', label: 'Customize', onClick: () => openAvatarCustomizer(profile, container, root) }
   ];
   return el('div', { class: 'profile-grid' }, items.map(i => el('div', {
     class: 'profile-grid-tile', onClick: i.onClick
