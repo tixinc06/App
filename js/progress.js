@@ -27,6 +27,7 @@ import { isPushSupported, getPushState, enablePush, disablePush, loadNotifPrefs,
 import { renderMeasurements } from './measurements.js';
 import { renderPhotos } from './photos.js';
 import { plateCalculatorModal } from './platecalc.js';
+import { renderWorkoutCalendar } from './workoutcal.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -122,6 +123,7 @@ async function renderSubView(container, root) {
     else if (profileView === 'alerts') await renderAlertsView(container, root);
     else if (profileView === 'measurements') await renderMeasurementsView(container, root);
     else if (profileView === 'photos') await renderPhotosView(container, root);
+    else if (profileView === 'history') await renderHistoryView(container, root);
     else { profileView = 'hub'; return renderProgress(container, root); }
   } catch (ex) {
     container.innerHTML = '';
@@ -284,6 +286,14 @@ async function renderPhotosView(container, root) {
   const body = el('div');
   container.append(body);
   await renderPhotos(body, root);
+}
+
+async function renderHistoryView(container, root) {
+  container.innerHTML = '';
+  container.append(backHeader('Workout history', container, root));
+  const body = el('div');
+  container.append(body);
+  await renderWorkoutCalendar(body, root);
 }
 
 // ── Inventory (owned themes, banners, boosters) ─────────────────────────────
@@ -488,6 +498,7 @@ function shortcutGrid(profile, container, root) {
     { icon: '⚖️', label: 'Weight planner', onClick: () => goProfileView('weight-planner', container, root) },
     { icon: '📏', label: 'Measurements', onClick: () => goProfileView('measurements', container, root) },
     { icon: '📸', label: 'Progress', onClick: () => goProfileView('photos', container, root) },
+    { icon: '📅', label: 'History', onClick: () => goProfileView('history', container, root) },
     { icon: '🔔', label: 'Alerts', onClick: () => goProfileView('alerts', container, root) },
     { icon: '🏋️', label: 'Plates', onClick: () => plateCalculatorModal() },
     { icon: '🏅', label: 'Ranks', onClick: () => goToSegment('ranks', root) },

@@ -135,6 +135,24 @@ async function renderTrainingLog(container, root) {
   const { workouts, weights } = data;
   container.innerHTML = '';
 
+  // ── Resume an in-progress workout, if one was left mid-session ──
+  const draft = loadWorkoutDraft();
+  if (draft) {
+    const exCount = draft.exercises?.length || 0;
+    container.append(el('div', { class: 'card', style: 'padding:14px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px' }, [
+      el('div', { style: 'font-size:26px' }, '▶'),
+      el('div', { class: 'grow', style: 'cursor:pointer', onClick: () => workoutBuilder(root, draft) }, [
+        el('div', { style: 'font-weight:700' }, draft.name?.trim() || 'Resume workout'),
+        el('div', { class: 'dim', style: 'font-size:12px;margin-top:2px' },
+          `${exCount} exercise${exCount === 1 ? '' : 's'} · started ${timeAgo(draft.startedAt)}`)
+      ]),
+      el('button', {
+        type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
+        onClick: () => { discardWorkoutDraft(); renderTrainingLog(container, root); }
+      }, '✕')
+    ]));
+  }
+
   // ── Bodyweight card ──
   const latest = weights[0];
   const prev = weights[1];
@@ -190,7 +208,33 @@ async function renderTrainingLog(container, root) {
     }
   }
 
-  container.append(el('button', { class: 'fab', title: 'Log workout', onClick: () => workoutBuilder(root) }, '+'));
+  container.append(el('button', {
+    class: 'fab', title: 'Log workout',
+    onClick: () => {
+      // Starting fresh over an existing draft would silently clobber it the
+      // moment the new session's first autosave fires (same localStorage
+      // key) — so ask first rather than losing it quietly.
+      if (loadWorkoutDraft()) {
+        confirmModal({
+          title: 'Discard in-progress workout?',
+          message: 'You have a workout in progress. Starting a new one will discard it.',
+          confirmText: 'Discard & start new',
+          onConfirm: () => { discardWorkoutDraft(); workoutBuilder(root); }
+        });
+      } else {
+        workoutBuilder(root);
+      }
+    }
+  }, '+'));
+}
+
+function timeAgo(ts) {
+  const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 function workoutRow(w, root) {
@@ -205,7 +249,7 @@ function workoutRow(w, root) {
   ]);
 }
 
-function viewWorkout(w, root) {
+export function viewWorkout(w, root) {
   const exs = Array.isArray(w.exercises) ? w.exercises : [];
   const body = exs.length ? exs.map(e =>
     el('div', { style: 'margin-bottom:12px' }, [
@@ -274,15 +318,57 @@ function weightActions(w, root) {
   ]);
 }
 
+// A live session's draft, so closing/backgrounding the app mid-workout
+// doesn't lose it. One draft per user (starting a fresh workout always
+// prompts to keep/discard an existing one first — see renderTrainingLog).
+function draftKey() { return 'workoutDraft:' + getUid(); }
+export function loadWorkoutDraft() {
+  try {
+    const raw = localStorage.getItem(draftKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+export function discardWorkoutDraft() {
+  localStorage.removeItem(draftKey());
+}
+
 // ── Workout builder (custom modal with dynamic exercises + sets) ──
-// `prefill`, if given, is { name, exercises: [{name, sets}] } from a template —
-// pre-populates the workout name and one exercise row (with that many empty
-// set rows) per template exercise, ready for the user to fill in real weights.
+// `prefill`, if given, is EITHER a template — { name, exercises: [{name,
+// sets:<count>}] } — pre-populating one empty-rows exercise per template
+// exercise, OR a saved draft — { name, date, notes, restSeconds, startedAt,
+// exercises: [{name, sets:[{weight,reps,ticked}]}] } — restoring exact
+// values. addExercise/addSet below detect which shape they got (a set
+// COUNT vs a set ARRAY) and handle both.
 export function workoutBuilder(root, prefill) {
   const exWrap = el('div');
   const state = []; // [{ nameInput, sets: [{weightInput, repsInput, ticked}] , node }]
-  let restSeconds = loadLastDuration();
-  const startedAt = Date.now();
+  let restSeconds = prefill?.restSeconds ?? loadLastDuration();
+  const startedAt = prefill?.startedAt ?? Date.now();
+
+  let draftTimer = null;
+  let draftFinalized = false; // set once the workout is actually saved — the
+  // close-flush observer below must not resurrect a draft that was just
+  // successfully persisted to the real `workouts` table.
+  function scheduleDraftSave() {
+    if (draftFinalized) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraftNow, 400);
+  }
+  function saveDraftNow() {
+    if (draftFinalized) return;
+    const draft = {
+      name: nameInput.value, date: dateInput.value, notes: notesInput.value,
+      restSeconds, startedAt,
+      exercises: state.map(e => ({
+        name: e.nameInput.value,
+        sets: e.sets.map(s => ({ weight: s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked }))
+      }))
+    };
+    const hasContent = draft.name.trim() ||
+      draft.exercises.some(e => e.name.trim() || e.sets.some(s => s.weight || s.reps));
+    if (hasContent) localStorage.setItem(draftKey(), JSON.stringify(draft));
+    else localStorage.removeItem(draftKey());
+  }
 
   function addExercise(initialName = '', initialSets = 0) {
     const setsWrap = el('div', { style: 'margin:8px 0 0' });
@@ -329,52 +415,54 @@ export function workoutBuilder(root, prefill) {
     nameInput.addEventListener('input', refreshHint);
     if (initialName) refreshHint();
 
-    function addSet(weight = '', reps = '') {
+    function addSet(weight = '', reps = '', ticked = false) {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
-      const rowObj = { weightInput: wI, repsInput: rI, ticked: false };
+      const rowObj = { weightInput: wI, repsInput: rI, ticked };
       const tickBtn = el('button', {
-        type: 'button', class: 'set-tick', title: 'Mark set done (starts rest timer)',
+        type: 'button', class: 'set-tick' + (ticked ? ' ticked' : ''), title: 'Mark set done (starts rest timer)',
         onClick: () => {
           rowObj.ticked = !rowObj.ticked;
           tickBtn.classList.toggle('ticked', rowObj.ticked);
           if (rowObj.ticked) { playSound('set_done'); startRestTimer(restSeconds); }
+          scheduleDraftSave();
         }
       }, '✓');
       const row = el('div', { class: 'row', style: 'margin-bottom:8px;align-items:center' }, [
         tickBtn, wI, rI,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
-          onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); }
+          onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); scheduleDraftSave(); }
         }, '✕')
       ]);
       sets.push(rowObj);
       setsWrap.append(row);
     }
-    for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
+    // `initialSets` is either a plain count (template prefill — empty rows)
+    // or an array of {weight,reps,ticked} (draft restore — exact values).
+    if (Array.isArray(initialSets)) {
+      for (const s of initialSets) addSet(s.weight, s.reps, !!s.ticked);
+    } else {
+      for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
+    }
 
     const exObj = { nameInput, sets };
     const node = el('div', { class: 'card', style: 'padding:14px;margin-bottom:12px' }, [
       el('div', { class: 'row', style: 'align-items:center' }, [
-        el('div', { class: 'drag-handle', title: 'Drag to reorder' }, '☰'),
         nameWrap,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-danger', style: 'flex:0 0 auto',
-          onClick: () => { const i = state.indexOf(exObj); if (i > -1) state.splice(i, 1); node.remove(); }
+          onClick: () => { const i = state.indexOf(exObj); if (i > -1) state.splice(i, 1); node.remove(); scheduleDraftSave(); }
         }, '🗑')
       ]),
       hintEl,
       setsWrap,
-      el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => addSet() }, '＋ Add set')
+      el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onClick: () => { addSet(); scheduleDraftSave(); } }, '＋ Add set')
     ]);
+    exObj.node = node;
     state.push(exObj);
     exWrap.append(node);
   }
-
-  makeReorderable(exWrap, {
-    handleSelector: '.drag-handle',
-    onReorder: (from, to) => { const [item] = state.splice(from, 1); state.splice(to, 0, item); }
-  });
 
   if (prefill?.exercises?.length) {
     for (const ex of prefill.exercises) addExercise(ex.name, ex.sets);
@@ -382,9 +470,10 @@ export function workoutBuilder(root, prefill) {
     addExercise();
   }
 
-  const dateInput = el('input', { type: 'date', value: todayISO(), style: 'margin-top:0' });
+  const dateInput = el('input', { type: 'date', value: prefill?.date || todayISO(), style: 'margin-top:0' });
   const nameInput = el('input', { placeholder: 'e.g. Push day', value: prefill?.name || '', style: 'margin-top:0' });
   const notesInput = el('textarea', { placeholder: 'Notes (optional)' });
+  notesInput.value = prefill?.notes || ''; // textarea content isn't settable via the `value` attribute
   const err = el('p', { class: 'form-error', hidden: true });
   const saveBtn = el('button', { class: 'btn btn-primary btn-block' }, 'Save workout');
 
@@ -415,6 +504,8 @@ export function workoutBuilder(root, prefill) {
         exercises
       });
       if (error) throw error;
+      draftFinalized = true;
+      discardWorkoutDraft();
       closeModal();
 
       // The whole progression pipeline (PR/goal detection, achievement
@@ -507,7 +598,60 @@ export function workoutBuilder(root, prefill) {
     }
   });
 
-  openModal(el('div', {}, [
+  // The reorder view lives INSIDE this same modal (toggled via hidden, not a
+  // second openModal() call) — the app has a single #modal-host, so opening
+  // a nested modal would replace this one wholesale and lose every entered
+  // value (the same bug hit and fixed for the chat attach-sheet in
+  // js/messages.js). A plain visibility swap between two sibling wraps
+  // sidesteps that entirely.
+  const normalWrap = el('div');
+  const reorderWrap = el('div', { hidden: true });
+
+  function openReorderMode() {
+    if (state.length < 2) { toast('Add at least 2 exercises to reorder', ''); return; }
+    let order = [...state];
+    const listEl = el('div', { class: 'reorder-list' });
+    function renderRows() {
+      listEl.innerHTML = '';
+      order.forEach((exObj, i) => {
+        listEl.append(el('div', { class: 'reorder-row' }, [
+          el('div', { class: 'drag-handle', title: 'Drag to reorder' }, '☰'),
+          el('div', { class: 'reorder-row-name' }, exObj.nameInput.value.trim() || `Exercise ${i + 1}`)
+        ]));
+      });
+    }
+    renderRows();
+    // The whole row is the drag target (not a small icon) — the point of
+    // this dedicated view is a reliable mobile drag, unlike the old per-card
+    // handle buried in a tall input-filled card.
+    makeReorderable(listEl, {
+      handleSelector: '.reorder-row',
+      onReorder: (from, to) => { const [item] = order.splice(from, 1); order.splice(to, 0, item); }
+    });
+
+    reorderWrap.innerHTML = '';
+    reorderWrap.append(
+      el('div', { class: 'section-head', style: 'margin:2px 2px 10px' }, [el('h2', {}, 'Reorder exercises')]),
+      el('div', { class: 'dim', style: 'font-size:13px;margin-bottom:12px' }, 'Drag by the ☰ handle, then tap Done.'),
+      listEl,
+      el('div', { class: 'row', style: 'gap:8px;margin-top:16px' }, [
+        el('button', { type: 'button', class: 'btn btn-ghost', style: 'flex:1', onClick: () => { normalWrap.hidden = false; reorderWrap.hidden = true; } }, 'Cancel'),
+        el('button', {
+          type: 'button', class: 'btn btn-primary', style: 'flex:1',
+          onClick: () => {
+            state.length = 0;
+            state.push(...order);
+            for (const exObj of order) exWrap.append(exObj.node);
+            normalWrap.hidden = false; reorderWrap.hidden = true;
+            scheduleDraftSave();
+          }
+        }, 'Done')
+      ])
+    );
+    normalWrap.hidden = true; reorderWrap.hidden = false;
+  }
+
+  normalWrap.append(
     el('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:2px' }, [
       el('h3', {}, prefill?.name ? 'Start: ' + prefill.name : 'Log workout'),
       durationEl
@@ -515,15 +659,45 @@ export function workoutBuilder(root, prefill) {
     el('label', {}, ['Date', dateInput]),
     el('label', {}, ['Workout name', nameInput]),
     el('div', { class: 'section-head', style: 'margin:10px 2px 2px' }, [el('h2', {}, 'Rest timer')]),
-    durationPickerEl(restSeconds, v => { restSeconds = v; }),
+    durationPickerEl(restSeconds, v => { restSeconds = v; scheduleDraftSave(); }),
     el('div', { class: 'section-head', style: 'margin:10px 2px 10px' }, [
       el('h2', {}, 'Exercises'),
       el('button', { type: 'button', class: 'link', onClick: () => plateCalculatorModal() }, '🏋️ Plate calc')
     ]),
     exWrap,
-    el('button', { type: 'button', class: 'btn btn-ghost btn-block', style: 'margin-bottom:14px', onClick: () => addExercise() }, '＋ Add exercise'),
+    el('div', { class: 'row', style: 'gap:8px;margin-bottom:14px' }, [
+      el('button', { type: 'button', class: 'btn btn-ghost', style: 'flex:1', onClick: () => { addExercise(); scheduleDraftSave(); } }, '＋ Add exercise'),
+      el('button', { type: 'button', class: 'btn btn-ghost', style: 'flex:1', onClick: openReorderMode }, '↕ Reorder exercises')
+    ]),
     el('label', {}, ['Notes', notesInput]),
     err,
     saveBtn
-  ]));
+  );
+
+  const modalRoot = el('div', {}, [normalWrap, reorderWrap]);
+  // Delegated listener catches every text/number/date/textarea change
+  // (name, date, notes, weight, reps) in one place — button-triggered
+  // mutations (tick, add/remove, reorder) call scheduleDraftSave() directly
+  // at their own call sites above, since those don't fire 'input' events.
+  modalRoot.addEventListener('input', scheduleDraftSave);
+  openModal(modalRoot);
+
+  // Flush a final save the moment the modal closes (✕, backdrop tap, or
+  // Save — the latter already discarded the draft above, and a flush after
+  // discard is harmless: hasContent will be false for a truly-saved/empty
+  // form, so saveDraftNow() just no-ops instead of resurrecting it).
+  const host = document.getElementById('modal-host');
+  const onVisibilityChange = () => { if (document.hidden) saveDraftNow(); };
+  // Also flush on backgrounding (phone locked, app switched) — a closed
+  // modal's MutationObserver won't fire until the modal itself is closed,
+  // but the app can be backgrounded while it's still open.
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  const closeObserver = new MutationObserver(() => {
+    if (host.hidden) {
+      saveDraftNow();
+      closeObserver.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
+  });
+  closeObserver.observe(host, { attributes: true, attributeFilter: ['hidden'] });
 }

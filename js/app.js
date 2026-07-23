@@ -79,6 +79,17 @@ function wireChrome() {
 
 // Left-edge swipe → back, and pull-down-at-top → refresh. Both are best judged
 // on a real phone; this is a best-effort touch implementation for the PWA.
+// Blocks pinch-zoom on iOS (the `gesturestart`/`gesturechange` events are an
+// iOS Safari-only API for this — harmless no-ops elsewhere). Combined with
+// the viewport meta's user-scalable=no (honoured in the installed
+// home-screen PWA) and touch-action:manipulation in CSS (kills double-tap
+// zoom cross-browser) this is the belt-and-braces set for "no zoom at all".
+function wireZoomPrevention() {
+  const prevent = e => e.preventDefault();
+  document.addEventListener('gesturestart', prevent);
+  document.addEventListener('gesturechange', prevent);
+}
+
 function wireGestures() {
   const pullIndicator = el('div', { class: 'pull-indicator' }, '↓');
   document.body.append(pullIndicator);
@@ -258,6 +269,7 @@ async function main() {
   wireAuthScreen();
   wireChrome();
   wireGestures();
+  wireZoomPrevention();
 
   await initSession(async session => {
     const myGen = ++sessionGen;
