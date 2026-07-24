@@ -7,18 +7,33 @@ import { renderFood } from './food.js';
 import { renderFitness } from './fitness.js';
 import { renderHome } from './home.js';
 import { loadAndApplyTheme } from './theme.js';
-import { el, toast } from './ui.js';
+import { el, toast, setCurrency, openModal, closeModal } from './ui.js';
 import { loadOwnProfile, claimUsername } from './profile.js';
 import { mountRestTimer } from './resttimer.js';
 import { renderFriends } from './social.js';
 import { renderAdmin } from './admin.js';
+import { loadWeightUnit } from './units.js';
+import { renderSettings } from './settings.js';
+import { sb } from './supabase.js';
+
+// Best-effort: falls back to the default £ on any failure (e.g. the
+// migration hasn't been run yet) — mirrors js/units.js's loadWeightUnit().
+async function loadCurrency() {
+  try {
+    const { data } = await sb.from('user_settings').select('currency').eq('user_id', getUid()).maybeSingle();
+    setCurrency(data?.currency || '£');
+  } catch {
+    setCurrency('£');
+  }
+}
 
 const sections = {
-  resell:  { title: 'Reselling', render: renderResell },
-  food:    { title: 'Food',      render: renderFood },
-  fitness: { title: 'Fitness',   render: renderFitness },
-  friends: { title: 'Friends',   render: c => renderFriends(c, c) },
-  admin:   { title: 'Admin',     render: c => renderAdmin(c, c) }
+  resell:   { title: 'Reselling', render: renderResell },
+  food:     { title: 'Food',      render: renderFood },
+  fitness:  { title: 'Fitness',   render: renderFitness },
+  friends:  { title: 'Friends',   render: c => renderFriends(c, c) },
+  settings: { title: 'Settings',  render: c => renderSettings(c, c) },
+  admin:    { title: 'Admin',     render: c => renderAdmin(c, c) }
 };
 let activeSection = null; // null = Home launcher; otherwise one of the keys above
 
@@ -239,6 +254,38 @@ function verifyFailedView() {
   ]));
 }
 
+// A one-time welcome for new accounts (localStorage flag, per-uid) — a
+// lightweight intro rather than a coach-mark tour, since the app now has
+// enough surface area that a first-time friend joining could otherwise be
+// lost with no orientation at all.
+function welcomeSeenKey() { return 'welcomeSeen:' + getUid(); }
+
+function maybeShowWelcome() {
+  if (localStorage.getItem(welcomeSeenKey())) return;
+  const sections = [
+    { icon: '📦', name: 'Reselling', sub: 'Inventory, sales & profit' },
+    { icon: '🍽️', name: 'Food', sub: 'Calories, macros & water' },
+    { icon: '💪', name: 'Fitness', sub: 'Workouts, ranks & progress' },
+    { icon: '👥', name: 'Friends', sub: 'Compare & share progress' }
+  ];
+  openModal(el('div', {}, [
+    el('h3', {}, '👋 Welcome to Tracker'),
+    el('p', { class: 'muted', style: 'margin-bottom:14px' },
+      'One private app for reselling, food, and fitness — plus friends to compare progress with.'),
+    el('div', { class: 'list', style: 'margin-bottom:16px' }, sections.map(s =>
+      el('div', { class: 'card item' }, [
+        el('div', { class: 'thumb' }, s.icon),
+        el('div', { class: 'grow' }, [el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, s.sub)])
+      ]))),
+    el('p', { class: 'dim', style: 'font-size:12px;margin-bottom:16px' },
+      'Tip: visit ⚙️ Settings any time to set your units (kg/lb), currency, and reminders.'),
+    el('button', {
+      class: 'btn btn-primary btn-block',
+      onClick: () => { localStorage.setItem(welcomeSeenKey(), '1'); closeModal(); }
+    }, 'Get started')
+  ]));
+}
+
 function bannedView(reason) {
   const container = document.getElementById('view');
   document.getElementById('view-title').textContent = 'Suspended';
@@ -284,7 +331,10 @@ async function main() {
       activeSection = null;
       renderActive('forward');
       loadAndApplyTheme();
+      loadWeightUnit();
+      loadCurrency();
       mountRestTimer();
+      maybeShowWelcome();
     } else {
       showOnly('auth-screen');
     }

@@ -1,7 +1,12 @@
 // Shared UI helpers: DOM building, toasts, modals, formatting, and animation.
 
-// Currency symbol used across the app.
-export const CUR = '£';
+// Currency symbol used across the app (money() below). Defaults to £; set at
+// boot from user_settings.currency (js/app.js) via setCurrency() — kept as
+// simple module state (like js/units.js's weight unit) rather than a prop
+// threaded through every caller, since money() is called from ~a dozen files.
+let CUR = '£';
+export function setCurrency(symbol) { CUR = symbol || '£'; }
+export function getCurrency() { return CUR; }
 
 export const prefersReducedMotion = () =>
   window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

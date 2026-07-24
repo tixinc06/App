@@ -10,6 +10,7 @@ import { getUid } from './auth.js';
 import { el, num, emptyState, skeleton, staggerChildren } from './ui.js';
 import { divisionForRatio, globalIndexToLabel, GROUPS, DIVISIONS_PER_GROUP, TOTAL_DIVISIONS } from './standards.js';
 import { rankTile, pipRow, groupColor } from './rankart.js';
+import { fmtWeight } from './units.js';
 
 // A couple of major compounds count double toward the overall aggregate so a
 // handful of isolation lifts can't skew it.
@@ -156,7 +157,7 @@ function overallCard(overall, bodyweight) {
       el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Overall rank'),
       el('div', { style: 'display:flex;justify-content:center;margin:12px 0' }, [rankTile(null, { size: 84 })]),
       el('div', { style: 'margin-top:4px' }, [rankBadge(null)]),
-      el('div', { class: 'dim', style: 'font-size:12px;margin-top:10px' }, `Based on bodyweight: ${num(bodyweight)}kg`)
+      el('div', { class: 'dim', style: 'font-size:12px;margin-top:10px' }, `Based on bodyweight: ${fmtWeight(bodyweight)}`)
     ]);
   }
 
@@ -179,7 +180,7 @@ function overallCard(overall, bodyweight) {
     overall.isGodly
       ? el('div', { class: 'dim', style: 'font-size:12px;margin-top:6px' }, `#${overall.position} of ${overall.total} globally`)
       : null,
-    el('div', { class: 'dim', style: 'font-size:12px;margin-top:10px' }, `Based on bodyweight: ${num(bodyweight)}kg`)
+    el('div', { class: 'dim', style: 'font-size:12px;margin-top:10px' }, `Based on bodyweight: ${fmtWeight(bodyweight)}`)
   ]);
 }
 
@@ -232,7 +233,7 @@ function exerciseRankRow(r) {
     el('div', { class: 'thumb' }, '🏋️'),
     el('div', { class: 'grow' }, [
       el('div', { class: 'title' }, r.exercise),
-      el('div', { class: 'sub' }, `${num(r.e1rm)}kg e1RM · ${r.ratio.toFixed(2)}× bodyweight · ${progressText}`)
+      el('div', { class: 'sub' }, `${fmtWeight(r.e1rm)} e1RM · ${r.ratio.toFixed(2)}× bodyweight · ${progressText}`)
     ]),
     rankBadge(r.group ? r : null)
   ]);

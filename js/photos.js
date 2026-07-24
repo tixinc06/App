@@ -11,6 +11,7 @@ import {
 } from './ui.js';
 import { loadFriendships, otherIdOf } from './profile.js';
 import { sendPhotoMessage } from './messages.js';
+import { weightUnit, displayToKg, fmtWeight, weightStep } from './units.js';
 
 const PRIVATE_BUCKET = 'progress-photos';
 const SHARE_BUCKET = 'progress-shares';
@@ -68,7 +69,7 @@ export async function renderPhotos(container, root) {
 function uploadForm(root, container) {
   const fileInput = el('input', { type: 'file', accept: 'image/*', required: true });
   const dateInput = el('input', { type: 'date', value: todayISO(), style: 'margin-top:0' });
-  const weightInput = el('input', { type: 'number', step: '0.1', min: '0', placeholder: 'optional', style: 'margin-top:0' });
+  const weightInput = el('input', { type: 'number', step: String(weightStep()), min: '0', placeholder: `optional (${weightUnit()})`, style: 'margin-top:0' });
   const noteInput = el('textarea', { placeholder: 'Note (optional)' });
   const err = el('p', { class: 'form-error', hidden: true });
   const saveBtn = el('button', { class: 'btn btn-primary btn-block' }, 'Save photo');
@@ -85,7 +86,7 @@ function uploadForm(root, container) {
       const { error } = await sb.from('progress_photos').insert({
         user_id: uid, taken_on: dateInput.value || todayISO(),
         storage_path: path,
-        weight: weightInput.value === '' ? null : Number(weightInput.value),
+        weight: weightInput.value === '' ? null : displayToKg(weightInput.value),
         note: noteInput.value.trim()
       });
       if (error) throw error;
@@ -102,7 +103,7 @@ function uploadForm(root, container) {
     el('h3', {}, 'Add progress photo'),
     el('label', {}, ['Photo', fileInput]),
     el('label', {}, ['Date', dateInput]),
-    el('label', {}, ['Bodyweight (optional)', weightInput]),
+    el('label', {}, [`Bodyweight (optional, ${weightUnit()})`, weightInput]),
     el('label', {}, ['Note', noteInput]),
     err,
     saveBtn
@@ -115,7 +116,7 @@ async function detailView(p, root, container) {
   openModal(el('div', {}, [
     el('h3', {}, fmtDate(p.taken_on)),
     url ? el('img', { src: url, alt: '', style: 'width:100%;border-radius:var(--radius-sm);margin-bottom:12px' }) : null,
-    p.weight != null ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Bodyweight: ${num(p.weight)}kg`) : null,
+    p.weight != null ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Bodyweight: ${fmtWeight(p.weight)}`) : null,
     p.note ? el('div', { class: 'muted', style: 'margin-bottom:14px' }, p.note) : null,
     el('div', { class: 'modal-actions' }, [
       el('button', { class: 'btn btn-danger', onClick: () => deletePhoto(p, root, container) }, 'Delete'),

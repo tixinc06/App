@@ -19,6 +19,7 @@ import {
 } from './profile.js';
 import { renderAvatar } from './avatar.js';
 import { renderConversations, openConversation, loadUnreadCount } from './messages.js';
+import { fmtWeight } from './units.js';
 
 function avatarThumb(profile, size = 46) {
   const wrap = el('div', { class: 'thumb avatar-thumb' });
@@ -370,7 +371,7 @@ async function openFriendDetail(oid, prof, prog, container, root) {
       ? el('div', { class: 'list', style: 'margin-bottom:16px' }, openGoals.map(g =>
           el('div', { class: 'card item' }, [
             el('div', { class: 'thumb' }, '🎯'),
-            el('div', { class: 'grow' }, [el('div', { class: 'title' }, `${g.exercise} — ${num(g.target_weight)}kg${g.target_reps > 1 ? ` ×${g.target_reps}` : ''}`)])
+            el('div', { class: 'grow' }, [el('div', { class: 'title' }, `${g.exercise} — ${fmtWeight(g.target_weight)}${g.target_reps > 1 ? ` ×${g.target_reps}` : ''}`)])
           ])))
       : el('div', { class: 'muted', style: 'margin-bottom:16px' }, 'No open goals.'),
     el('div', { class: 'section-head' }, [el('h2', {}, 'Shared plans')]),

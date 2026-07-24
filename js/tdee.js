@@ -5,6 +5,7 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, num, toast, emptyState, skeleton } from './ui.js';
+import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
 
 const KCAL_PER_KG = 7700; // ~3,500 kcal/lb, the standard rough conversion
 export const AGGRESSIVENESS_OPTIONS = [300, 500, 750];
@@ -82,7 +83,10 @@ export async function renderWeightPlanner(container, root) {
   ]);
   const activitySelect = el('select', {}, ACTIVITY_LEVELS.map(a =>
     el('option', { value: a.value, selected: Number(s.activity_level) === a.value }, a.label)));
-  const goalInput = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', min: '0', placeholder: 'kg', value: s.goal_weight ?? '' });
+  const goalInput = el('input', {
+    type: 'number', inputmode: 'decimal', step: String(weightStep()), min: '0', placeholder: weightUnit(),
+    value: s.goal_weight != null ? kgToDisplay(s.goal_weight) : ''
+  });
 
   let dailyDelta = 500;
   const deltaButtons = {};
@@ -106,7 +110,7 @@ export async function renderWeightPlanner(container, root) {
       age: Number(ageInput.value) || 0,
       sex: sexSelect.value,
       activityLevel: Number(activitySelect.value),
-      goalWeight: Number(goalInput.value) || state.currentWeight
+      goalWeight: goalInput.value !== '' ? displayToKg(goalInput.value) : state.currentWeight
     };
   }
 
@@ -131,7 +135,7 @@ export async function renderWeightPlanner(container, root) {
       el('div', { style: 'font-size:28px;font-weight:800;margin:4px 0 4px;color:var(--primary-soft)' }, `${num(plan.target)} kcal`),
       el('div', { class: 'dim', style: 'font-size:13px' }, dirLabel),
       plan.etaWeeks
-        ? el('div', { style: 'margin-top:14px;font-size:14px' }, `📅 ~${plan.etaWeeks} week${plan.etaWeeks === 1 ? '' : 's'} to reach ${num(v.goalWeight)}kg at this pace`)
+        ? el('div', { style: 'margin-top:14px;font-size:14px' }, `📅 ~${plan.etaWeeks} week${plan.etaWeeks === 1 ? '' : 's'} to reach ${fmtWeight(v.goalWeight)} at this pace`)
         : null
     );
   }
@@ -163,12 +167,12 @@ export async function renderWeightPlanner(container, root) {
 
   container.append(
     el('div', { class: 'card', style: 'padding:16px 18px' }, [
-      el('div', { class: 'dim', style: 'font-size:13px;margin-bottom:12px' }, `Using your latest bodyweight: ${num(state.currentWeight)}kg`),
+      el('div', { class: 'dim', style: 'font-size:13px;margin-bottom:12px' }, `Using your latest bodyweight: ${fmtWeight(state.currentWeight)}`),
       el('label', {}, ['Height (cm)', heightInput]),
       el('label', {}, ['Age', ageInput]),
       el('label', {}, ['Sex', sexSelect]),
       el('label', {}, ['Activity level', activitySelect]),
-      el('label', {}, ['Goal weight (kg)', goalInput]),
+      el('label', {}, [`Goal weight (${weightUnit()})`, goalInput]),
       el('div', { class: 'k', style: 'font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-top:12px' }, 'Pace'),
       deltaRow
     ]),

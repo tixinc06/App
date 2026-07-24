@@ -25,6 +25,7 @@ import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
 import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 import { plateCalculatorModal } from './platecalc.js';
 import { playSound } from './sound.js';
+import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
 
 // Best set by estimated 1RM (Epley) — same convention used for PR detection
 // in js/progression.js. Used to anchor the progressive-overload hint.
@@ -153,7 +154,7 @@ async function renderTrainingLog(container, root) {
     ]));
   }
 
-  // ── Bodyweight card ──
+  // ── Bodyweight card (always stored in kg — displayed in the chosen unit) ──
   const latest = weights[0];
   const prev = weights[1];
   const delta = latest && prev ? Number(latest.weight) - Number(prev.weight) : null;
@@ -164,7 +165,7 @@ async function renderTrainingLog(container, root) {
         el('div', { class: 'k', style: 'font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase' }, 'Bodyweight'),
         el('div', { style: 'font-size:28px;font-weight:800;margin-top:4px' }, [
           weightNumEl,
-          (latest && delta != null) ? el('span', {}, ` ${delta >= 0 ? '▲' : '▼'} ${num(Math.abs(delta))}`) : null
+          (latest && delta != null) ? el('span', {}, ` ${delta >= 0 ? '▲' : '▼'} ${num(kgToDisplay(Math.abs(delta)))}`) : null
         ])
       ]),
       el('button', { class: 'btn btn-sm btn-primary', onClick: () => addWeightForm(root) }, '＋ Log')
@@ -172,14 +173,14 @@ async function renderTrainingLog(container, root) {
     weights.length ? el('div', { class: 'dim', style: 'font-size:12px;margin-top:8px' },
       'Last: ' + fmtDate(latest.entry_date)) : null
   ]));
-  if (latest) countUp(weightNumEl, Number(latest.weight), num);
+  if (latest) countUp(weightNumEl, kgToDisplay(latest.weight), v => `${num(v)} ${weightUnit()}`);
 
   if (weights.length > 1) {
     container.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Weight history')]));
     const weightList = el('div', { class: 'list', style: 'margin-bottom:22px' },
       weights.slice(0, 8).map(w =>
         el('div', { class: 'card item', onClick: () => weightActions(w, root) }, [
-          el('div', { class: 'grow' }, [el('div', { class: 'title' }, num(w.weight))]),
+          el('div', { class: 'grow' }, [el('div', { class: 'title' }, fmtWeight(w.weight))]),
           el('div', { class: 'sub' }, fmtDate(w.entry_date))
         ])));
     staggerChildren(weightList);
@@ -188,8 +189,8 @@ async function renderTrainingLog(container, root) {
 
   // ── Bodyweight trend ──
   if (weights.length >= 2) {
-    const series = [...weights].reverse().map(w => ({ t: w.entry_date, v: +w.weight }));
-    container.append(chartCard('Bodyweight trend', lineChart(series, { color: 'var(--blue)', fmt: v => num(v) })));
+    const series = [...weights].reverse().map(w => ({ t: w.entry_date, v: kgToDisplay(w.weight) }));
+    container.append(chartCard(`Bodyweight trend (${weightUnit()})`, lineChart(series, { color: 'var(--blue)', fmt: v => num(v) })));
   }
 
   // ── Workouts ──
@@ -255,7 +256,7 @@ export function viewWorkout(w, root) {
     el('div', { style: 'margin-bottom:12px' }, [
       el('div', { style: 'font-weight:700;margin-bottom:4px' }, e.name || 'Exercise'),
       el('div', { class: 'muted', style: 'font-size:14px' },
-        (e.sets || []).map(s => `${num(s.weight)}×${num(s.reps)}`).join('   ') || 'No sets')
+        (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}`).join('   ') || 'No sets')
     ])) : [el('p', { class: 'muted' }, 'No exercises recorded.')];
 
   openModal(el('div', {}, [
@@ -290,12 +291,13 @@ function addWeightForm(root) {
   formModal({
     title: 'Log bodyweight',
     fields: [
-      { name: 'weight', label: 'Weight', type: 'number', step: '0.1', min: '0', required: true },
+      { name: 'weight', label: `Weight (${weightUnit()})`, type: 'number', step: String(weightStep()), min: '0', required: true },
       { name: 'entry_date', label: 'Date', type: 'date', value: todayISO() }
     ],
     submitText: 'Save',
     onSubmit: async v => {
-      const { error } = await sb.from('weight_entries').insert({ ...v, user_id: getUid() });
+      const { error } = await sb.from('weight_entries')
+        .insert({ ...v, weight: displayToKg(v.weight), user_id: getUid() });
       if (error) throw error;
       toast('Logged', 'ok');
       renderFitness(root);
@@ -304,7 +306,7 @@ function addWeightForm(root) {
 }
 
 function weightActions(w, root) {
-  actionSheet(num(w.weight) + ' · ' + fmtDate(w.entry_date), [
+  actionSheet(fmtWeight(w.weight) + ' · ' + fmtDate(w.entry_date), [
     { label: '🗑️ Delete', danger: true, onClick: () => {
       confirmModal({
         title: 'Delete entry?', confirmText: 'Delete',
@@ -387,19 +389,24 @@ export function workoutBuilder(root, prefill) {
         const prev = await loadPreviousPerformance(name);
         if (!prev) { hintEl.hidden = true; return; }
         hintEl.innerHTML = '';
+        // prev.sets come straight from the stored workouts.exercises JSONB —
+        // always kg — so every displayed/suggested weight here converts to
+        // the current display unit; only the on-screen numbers change.
         hintEl.append(el('div', { class: 'dim', style: 'font-size:12px' },
-          `Last time (${fmtDate(prev.date)}): ` + prev.sets.map(s => `${num(s.weight)}×${num(s.reps)}`).join(', ')));
+          `Last time (${fmtDate(prev.date)}): ` + prev.sets.map(s => `${num(kgToDisplay(s.weight))}×${num(s.reps)}`).join(', ')));
 
         // Progressive-overload suggestion off the best set (highest est. 1RM),
         // matching the same Epley-formula convention used for PR detection.
         const best = bestSetOf(prev.sets);
         if (best && Number(best.weight) > 0 && Number(best.reps) > 0) {
-          const incWeight = Math.round((Number(best.weight) + 2.5) * 2) / 2;
+          const bestDisplay = kgToDisplay(best.weight);
+          const bump = weightUnit() === 'lb' ? 5 : 2.5; // a sensible round increment per unit
+          const incWeight = Math.round((bestDisplay + bump) / weightStep()) * weightStep();
           const sameReps = Number(best.reps);
           const incReps = sameReps + 1;
           hintEl.append(el('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:4px' }, [
             el('div', { class: 'dim', style: 'font-size:12px;flex:1' },
-              `💡 Try ${num(incWeight)}kg × ${sameReps}, or ${num(best.weight)}kg × ${incReps}`),
+              `💡 Try ${num(incWeight)}${weightUnit()} × ${sameReps}, or ${num(bestDisplay)}${weightUnit()} × ${incReps}`),
             el('button', {
               type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
               onClick: () => {
@@ -416,7 +423,7 @@ export function workoutBuilder(root, prefill) {
     if (initialName) refreshHint();
 
     function addSet(weight = '', reps = '', ticked = false) {
-      const wI = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', value: weight, style: 'margin-top:0' });
+      const wI = el('input', { type: 'number', inputmode: 'decimal', step: String(weightStep()), placeholder: weightUnit(), value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
       const rowObj = { weightInput: wI, repsInput: rI, ticked };
       const tickBtn = el('button', {
@@ -489,7 +496,7 @@ export function workoutBuilder(root, prefill) {
       .map(e => ({
         name: e.nameInput.value.trim(),
         sets: e.sets
-          .map(s => ({ weight: Number(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0 }))
+          .map(s => ({ weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0 }))
           .filter(s => s.reps > 0 || s.weight > 0)
       }))
       .filter(e => e.name || e.sets.length);

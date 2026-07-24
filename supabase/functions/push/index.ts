@@ -10,6 +10,7 @@
 //  - a Database Webhook on `messages` INSERT      -> { type:'messages', record }
 //  - a Database Webhook on `friendships` INSERT    -> { type:'friend_requests', record }
 //  - a daily pg_cron job                           -> { type:'streak' }
+//  - a pg_cron job every 30 minutes                -> { type:'reminders' }
 // Every call must include header `x-push-secret: <PUSH_HOOK_SECRET>` — this
 // is the only thing stopping an arbitrary caller from spamming users.
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -86,6 +87,70 @@ async function handleStreak() {
   }
 }
 
+// Rounds a "HH:MM" string down to its 30-minute slot, so a reminder set for
+// e.g. 18:07 matches the 18:00-18:29 cron run and never double-fires within
+// the same slot even if the cron invocation runs a little late.
+function bucket30(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const roundedMin = (m || 0) < 30 ? '00' : '30';
+  return `${String(h || 0).padStart(2, '0')}:${roundedMin}`;
+}
+
+// The caller's local wall-clock time + weekday in `tz`, computed via Intl
+// (no date-time library needed) — this is what lets a reminder set for
+// "18:00" fire at 6pm in the USER's own timezone, not the server's.
+function localPartsInZone(tz: string): { hhmm: string; dow: number } {
+  const WEEKDAY: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short'
+  });
+  const parts = fmt.formatToParts(new Date());
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+  let hour = get('hour');
+  if (hour === '24') hour = '00'; // some locales render midnight as 24:00
+  return { hhmm: `${hour}:${get('minute')}`, dow: WEEKDAY[get('weekday')] ?? new Date().getUTCDay() };
+}
+
+type ReminderPrefs = {
+  food?: { enabled?: boolean; time?: string };
+  workout?: { enabled?: boolean; time?: string };
+  weighin?: { enabled?: boolean; time?: string; dow?: number };
+};
+
+const REMINDER_COPY: Record<string, [string, string]> = {
+  food: ['Log your food 🍽️', "Don't forget to track today's meals."],
+  workout: ['Train today 💪', 'Time to get your workout in.'],
+  weighin: ['Weigh-in day ⚖️', "Log today's bodyweight."]
+};
+
+// For every user with reminder_prefs set, check each enabled reminder type
+// against their LOCAL time (from their stored timezone) and fire any whose
+// time falls in the current 30-minute cron slot.
+async function handleReminders() {
+  const { data: rows } = await sb.from('user_settings')
+    .select('user_id,reminder_prefs,timezone').not('reminder_prefs', 'is', null);
+
+  for (const row of rows || []) {
+    const prefs = (row.reminder_prefs as ReminderPrefs) || {};
+    let local: { hhmm: string; dow: number };
+    try {
+      local = localPartsInZone(row.timezone || 'UTC');
+    } catch {
+      continue; // unrecognised timezone string — skip rather than guess
+    }
+    const nowSlot = bucket30(local.hhmm);
+
+    for (const key of ['food', 'workout', 'weighin'] as const) {
+      const p = prefs[key];
+      if (!p?.enabled || !p?.time) continue;
+      if (key === 'weighin' && p.dow != null && Number(p.dow) !== local.dow) continue;
+      if (bucket30(p.time) !== nowSlot) continue;
+      const [title, body] = REMINDER_COPY[key];
+      await sendToUser(row.user_id as string, key, title, body, './');
+    }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.headers.get('x-push-secret') !== PUSH_HOOK_SECRET) {
     return new Response('Unauthorized', { status: 401 });
@@ -105,6 +170,8 @@ Deno.serve(async (req) => {
       await handleFriendRequest(payload.record as never);
     } else if (payload.type === 'streak') {
       await handleStreak();
+    } else if (payload.type === 'reminders') {
+      await handleReminders();
     }
     return new Response('ok');
   } catch (err) {

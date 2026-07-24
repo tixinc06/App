@@ -28,6 +28,7 @@ import { renderMeasurements } from './measurements.js';
 import { renderPhotos } from './photos.js';
 import { plateCalculatorModal } from './platecalc.js';
 import { renderWorkoutCalendar } from './workoutcal.js';
+import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -594,10 +595,10 @@ function goalRow(g, prs, container, root) {
   return el('div', { class: 'card item', onClick: () => goalActions(g, container, root) }, [
     el('div', { class: 'thumb' }, g.achieved ? '✅' : '🎯'),
     el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, `${g.exercise} — ${num(target)}kg${g.target_reps > 1 ? ` ×${g.target_reps}` : ''}`),
+      el('div', { class: 'title' }, `${g.exercise} — ${fmtWeight(target)}${g.target_reps > 1 ? ` ×${g.target_reps}` : ''}`),
       el('div', { class: 'sub' }, g.achieved
         ? `Achieved ${fmtDate((g.achieved_at || '').slice(0, 10))}`
-        : `Current: ${num(current)}kg (${pct.toFixed(0)}%)`)
+        : `Current: ${fmtWeight(current)} (${pct.toFixed(0)}%)`)
     ])
   ]);
 }
@@ -623,12 +624,13 @@ function addGoalForm(container, root) {
     title: 'New goal',
     fields: [
       { name: 'exercise', label: 'Exercise', required: true, placeholder: 'e.g. Bench Press' },
-      { name: 'target_weight', label: 'Target weight (kg)', type: 'number', step: '0.5', min: '0', required: true },
+      { name: 'target_weight', label: `Target weight (${weightUnit()})`, type: 'number', step: String(weightStep()), min: '0', required: true },
       { name: 'target_reps', label: 'For at least this many reps (optional)', type: 'number', step: '1', min: '1', value: 1 }
     ],
     submitText: 'Set goal',
     onSubmit: async v => {
-      const { error } = await sb.from('fitness_goals').insert({ ...v, user_id: getUid() });
+      const { error } = await sb.from('fitness_goals')
+        .insert({ ...v, target_weight: displayToKg(v.target_weight), user_id: getUid() });
       if (error) throw error;
       toast('Goal set 🎯', 'ok');
       renderProgress(container, root);
@@ -642,7 +644,7 @@ function prRow(p) {
     el('div', { class: 'grow' }, [
       el('div', { class: 'title' }, p.exercise),
       el('div', { class: 'sub' },
-        `${num(p.best_weight)}kg × ${p.best_reps} · e1RM ~${num(p.best_e1rm)}kg · ${fmtDate((p.achieved_at || '').slice(0, 10))}`)
+        `${fmtWeight(p.best_weight)} × ${p.best_reps} · e1RM ~${fmtWeight(p.best_e1rm)} · ${fmtDate((p.achieved_at || '').slice(0, 10))}`)
     ])
   ]);
 }
