@@ -331,6 +331,17 @@ export function makeReorderable(listEl, { handleSelector = '.drag-handle', onReo
     document.addEventListener('pointercancel', onUp);
   }
 
+  // Defensive: if the app is backgrounded mid-drag (app switch, phone lock),
+  // some mobile browsers never fire the pointerup/pointercancel that would
+  // normally call reset() — leaving a dangling document-level pointermove
+  // listener and a drag item stuck at position:relative/z-index:20. That's
+  // exactly the kind of leftover state that could make touch scrolling
+  // elsewhere feel broken until the page is reloaded. Force a reset on
+  // return so a half-finished drag can never outlive the tab switch.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && dragItem) reset();
+  });
+
   function onMove(e) {
     if (!dragItem) return;
     const deltaY = e.clientY - startY;

@@ -9,6 +9,7 @@ import {
 } from './ui.js';
 import { workoutBuilder } from './fitness.js';
 import { attachExercisePicker } from './exercises.js';
+import { exerciseThumb } from './exercisemedia.js';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -189,12 +190,18 @@ function templateEditorModal(container, root, existing) {
   function addRow(name = '', sets = 0, reps = 10) {
     const nameInput = el('input', { placeholder: 'Exercise name', value: name, style: 'margin-top:0' });
     attachExercisePicker(nameInput);
+    const thumbWrap = el('div', { style: 'flex:0 0 auto' }, [exerciseThumb(name, null, { size: 36 })]);
+    nameInput.addEventListener('input', () => {
+      thumbWrap.innerHTML = '';
+      thumbWrap.append(exerciseThumb(nameInput.value.trim(), null, { size: 36 }));
+    });
     const setsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '0', placeholder: 'sets', value: sets, style: 'margin-top:0' });
     const repsInput = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
     const rowObj = { nameInput, setsInput, repsInput };
     const node = el('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' }, [
       el('div', { class: 'row', style: 'align-items:center' }, [
         el('div', { class: 'drag-handle', title: 'Drag to reorder' }, '☰'),
+        thumbWrap,
         el('div', { style: 'flex:1;min-width:0' }, [nameInput])
       ]),
       el('div', { class: 'row', style: 'margin-top:8px;align-items:center' }, [

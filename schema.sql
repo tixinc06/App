@@ -932,3 +932,20 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS weight_unit TEXT NOT NULL DEF
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT '£';
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS reminder_prefs JSONB;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS timezone TEXT;
+
+-- ── Round 7: scheduled pushes (rest-timer background alerts).
+-- See migration-round7.sql for the pg_cron dashboard setup.
+CREATE TABLE IF NOT EXISTS scheduled_pushes (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  fire_at    TIMESTAMPTZ NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  tag        TEXT,
+  sent_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE scheduled_pushes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own scheduled_pushes" ON scheduled_pushes
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_due ON scheduled_pushes (fire_at) WHERE sent_at IS NULL;

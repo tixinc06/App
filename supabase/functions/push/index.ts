@@ -11,6 +11,7 @@
 //  - a Database Webhook on `friendships` INSERT    -> { type:'friend_requests', record }
 //  - a daily pg_cron job                           -> { type:'streak' }
 //  - a pg_cron job every 30 minutes                -> { type:'reminders' }
+//  - a pg_cron job every 15 seconds                -> { type:'scheduled' }
 // Every call must include header `x-push-secret: <PUSH_HOOK_SECRET>` — this
 // is the only thing stopping an arbitrary caller from spamming users.
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -35,14 +36,17 @@ async function notifAllowed(userId: string, type: string): Promise<boolean> {
   return prefs[type] !== false; // default on
 }
 
-async function sendToUser(userId: string, type: string, title: string, body: string, url = './') {
+// `tag` defaults to `type` (unchanged behaviour for every existing caller);
+// scheduled pushes pass their own tag ('rest-timer') so a locally-fired
+// notification and a late server one collapse into one instead of stacking.
+async function sendToUser(userId: string, type: string, title: string, body: string, url = './', tag = type) {
   if (!(await notifAllowed(userId, type))) return;
   const { data: subs } = await sb.from('push_subscriptions').select('id, subscription').eq('user_id', userId);
   for (const row of subs || []) {
     try {
       await webpush.sendNotification(
         row.subscription,
-        JSON.stringify({ title, body, url, tag: type })
+        JSON.stringify({ title, body, url, tag })
       );
     } catch (err) {
       const status = (err as { statusCode?: number })?.statusCode;
@@ -151,6 +155,30 @@ async function handleReminders() {
   }
 }
 
+// Sends every due, unsent scheduled_pushes row (currently just the rest
+// timer) and stamps sent_at. Rows more than ~2 minutes past their fire_at are
+// skipped rather than sent late — a backlog (e.g. the cron job was paused)
+// must not ding for a rest that finished long ago; they're still stamped
+// sent_at so they don't pile up and get rechecked forever.
+async function handleScheduled() {
+  const now = Date.now();
+  const staleCutoff = new Date(now - 2 * 60 * 1000).toISOString();
+  const { data: rows } = await sb.from('scheduled_pushes')
+    .select('id,user_id,title,body,tag,fire_at')
+    .is('sent_at', null)
+    .lte('fire_at', new Date(now).toISOString());
+  if (!rows?.length) return;
+
+  for (const row of rows) {
+    if (row.fire_at < staleCutoff) {
+      await sb.from('scheduled_pushes').update({ sent_at: new Date().toISOString() }).eq('id', row.id);
+      continue;
+    }
+    await sendToUser(row.user_id as string, 'rest', row.title as string, row.body as string, './', (row.tag as string) || 'scheduled');
+    await sb.from('scheduled_pushes').update({ sent_at: new Date().toISOString() }).eq('id', row.id);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.headers.get('x-push-secret') !== PUSH_HOOK_SECRET) {
     return new Response('Unauthorized', { status: 401 });
@@ -172,6 +200,8 @@ Deno.serve(async (req) => {
       await handleStreak();
     } else if (payload.type === 'reminders') {
       await handleReminders();
+    } else if (payload.type === 'scheduled') {
+      await handleScheduled();
     }
     return new Response('ok');
   } catch (err) {

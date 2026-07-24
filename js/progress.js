@@ -29,6 +29,8 @@ import { renderPhotos } from './photos.js';
 import { plateCalculatorModal } from './platecalc.js';
 import { renderWorkoutCalendar } from './workoutcal.js';
 import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
+import { exerciseThumb } from './exercisemedia.js';
+import { renderExerciseDetail } from './exercisedetail.js';
 
 async function loadExtras() {
   const uid = getUid();
@@ -182,7 +184,7 @@ async function renderPRsView(container, root) {
   if (!prs.length) {
     container.append(emptyState('🏆', 'Log workouts to start tracking PRs.'));
   } else {
-    const list = el('div', { class: 'list' }, prs.map(prRow));
+    const list = el('div', { class: 'list' }, prs.map(p => prRow(p, container, root)));
     staggerChildren(list);
     container.append(list);
   }
@@ -638,9 +640,12 @@ function addGoalForm(container, root) {
   });
 }
 
-function prRow(p) {
-  return el('div', { class: 'card item' }, [
-    el('div', { class: 'thumb' }, '🏆'),
+function prRow(p, container, root) {
+  return el('div', {
+    class: 'card item',
+    onClick: () => renderExerciseDetail(container, root, p.exercise, () => renderPRsView(container, root))
+  }, [
+    exerciseThumb(p.exercise, null, { size: 46 }),
     el('div', { class: 'grow' }, [
       el('div', { class: 'title' }, p.exercise),
       el('div', { class: 'sub' },

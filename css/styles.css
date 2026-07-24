@@ -128,6 +128,12 @@ textarea{resize:vertical; min-height:70px}
 .empty{text-align:center; padding:40px 20px; color:var(--muted-dim)}
 .empty .big{font-size:34px; margin-bottom:10px}
 
+/* ── Exercise thumbnails (js/exercisemedia.js) ───────────────────────────── */
+.ex-thumb{border-radius:50%; overflow:hidden; flex-shrink:0;
+  background:color-mix(in srgb, var(--ex-thumb-color, var(--muted)) 16%, var(--bg2));
+  display:grid; place-items:center; border:1px solid var(--border)}
+.ex-thumb-svg{width:100%; height:100%; display:block}
+
 .fab{position:fixed; right:18px; bottom:calc(18px + var(--safe-b)); z-index:25;
   width:56px; height:56px; border-radius:50%; border:none; font-size:28px; color:#fff;
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
@@ -136,33 +142,43 @@ textarea{resize:vertical; min-height:70px}
 .fab-secondary{right:86px; width:48px; height:48px; font-size:20px;
   background:var(--card2); color:var(--text); box-shadow:var(--shadow); border:1px solid var(--border)}
 
-/* ── Rest timer ───────────────────────────────────────────────────────────── */
+/* ── Rest timer — a big bar docked to the bottom of the screen (not a small
+   floating pill) so it reads clearly during a live set, and sits BELOW the
+   modal/content z-index-wise never on top of scrollable content. ── */
 .rest-timer-bar{
-  position:fixed; left:50%; transform:translateX(-50%);
-  bottom:calc(150px + var(--safe-b)); z-index:55;
-  display:flex; align-items:center; gap:12px;
-  background:var(--card2); border:1px solid var(--border); border-radius:999px;
-  padding:6px 10px 6px 6px; box-shadow:var(--shadow);
-  max-width:calc(100% - 32px);
+  position:fixed; left:0; right:0; bottom:0; z-index:55;
+  display:flex; align-items:center; gap:14px;
+  background:var(--card2); border-top:1px solid var(--border);
+  border-radius:18px 18px 0 0;
+  padding:12px 16px calc(12px + var(--safe-b));
+  box-shadow:0 -6px 24px -6px rgba(0,0,0,.35);
   transition:box-shadow .3s ease;
 }
-.rt-ring-wrap{position:relative; width:48px; height:48px; flex:0 0 auto}
-.rt-ring{width:48px; height:48px; transform:rotate(-90deg)}
-.rt-ring-track{fill:none; stroke:var(--bg2); stroke-width:4}
-.rt-ring-progress{fill:none; stroke:url(#rt-ring-grad); stroke-width:4; stroke-linecap:round;
+.rt-ring-wrap{position:relative; width:72px; height:72px; flex:0 0 auto}
+.rt-ring{width:72px; height:72px; transform:rotate(-90deg)}
+.rt-ring-track{fill:none; stroke:var(--bg2); stroke-width:5}
+.rt-ring-progress{fill:none; stroke:url(#rt-ring-grad); stroke-width:5; stroke-linecap:round;
   transition:stroke-dashoffset .22s linear}
 .rt-grad-a{stop-color:var(--primary-soft)}
 .rt-grad-b{stop-color:var(--primary)}
 .rt-time{position:absolute; inset:0; display:grid; place-items:center;
-  font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px}
-.rt-label{font-size:13px; font-weight:700; white-space:nowrap; color:var(--muted)}
-.rt-actions{display:flex; gap:6px}
-.rt-icon-btn{padding:6px 10px; font-size:12px; font-weight:700}
+  font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px}
+.rt-label{font-size:14px; font-weight:700; white-space:nowrap; color:var(--muted); flex:1}
+.rt-actions{display:flex; gap:8px; flex:0 0 auto}
+.rt-icon-btn{padding:12px 16px; font-size:15px; font-weight:700; min-width:44px; min-height:44px}
 
-.rt-urgent{box-shadow:0 0 0 2px var(--red), var(--shadow); animation:rtPulse 1s ease-in-out infinite}
+.rt-urgent{box-shadow:0 -6px 24px -6px rgba(0,0,0,.35), inset 0 0 0 2px var(--red); animation:rtPulse 1s ease-in-out infinite}
 .rt-urgent .rt-ring-progress{stroke:var(--red)}
 .rt-urgent .rt-time{color:var(--red)}
-@keyframes rtPulse{0%,100%{transform:translateX(-50%) scale(1)} 50%{transform:translateX(-50%) scale(1.035)}}
+@keyframes rtPulse{0%,100%{transform:scale(1)} 50%{transform:scale(1.015)}}
+
+/* Bottom-docked content offsets while the timer bar is showing (toggled via
+   body.rt-active in js/resttimer.js's render()) so nothing ends up hidden
+   behind it. */
+body.rt-active .fab{bottom:calc(104px + var(--safe-b))}
+body.rt-active .toast-host{bottom:calc(174px + var(--safe-b))}
+body.rt-active .view{padding-bottom:calc(112px + var(--safe-b))}
+body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
 
 .rt-finished-flash{
   position:fixed; left:50%; top:calc(18px + var(--safe-t,0px)); transform:translate(-50%,-16px);
@@ -217,6 +233,15 @@ textarea{resize:vertical; min-height:70px}
   display:grid; place-items:center; font-size:15px; cursor:pointer; transition:all .15s ease}
 .set-tick.ticked{background:var(--green); border-color:var(--green); color:#06231a}
 
+/* ── Per-set "last time" ghost hint (B1) ─────────────────────────────────── */
+.set-prev{font-size:11px; color:var(--muted-dim); margin:2px 2px 0 44px}
+
+/* ── Live in-session PR medal (B2) ───────────────────────────────────────── */
+.pr-medal{font-size:20px; line-height:1}
+@keyframes prMedalPop{0%{transform:scale(0.3) rotate(-15deg)} 60%{transform:scale(1.3) rotate(8deg)} 100%{transform:scale(1) rotate(0)}}
+.pr-medal-pop{animation:prMedalPop .5s cubic-bezier(.34,1.56,.64,1)}
+@media (prefers-reduced-motion: reduce){ .pr-medal-pop{animation:none} }
+
 /* ── Toasts ───────────────────────────────────────────────────────────────── */
 .toast-host{position:fixed; left:0; right:0; bottom:calc(88px + var(--safe-b)); z-index:60;
   display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none}
@@ -235,7 +260,13 @@ textarea{resize:vertical; min-height:70px}
 .modal{position:relative; width:100%; max-width:520px; max-height:92dvh; overflow-y:auto;
   background:var(--card); border:1px solid var(--border);
   border-radius:20px 20px 0 0; padding:22px 20px calc(22px + var(--safe-b));
-  animation:sheetIn .22s ease}
+  animation:sheetIn .22s ease;
+  /* Reported bug: scrolling inside a live-workout modal sometimes stopped
+     working until the app was backgrounded and reopened. iOS scroll-chains a
+     touch past this scroller's boundary up to a non-scrolling ancestor and
+     can wedge the gesture there; contain stops the handoff, and the -webkit
+     property keeps momentum scrolling smooth on iOS Safari specifically. */
+  overscroll-behavior:contain; -webkit-overflow-scrolling:touch}
 @keyframes sheetIn{from{transform:translateY(24px); opacity:.6}to{transform:none; opacity:1}}
 .modal-close{position:absolute; top:14px; right:14px; z-index:1;
   width:30px; height:30px; border-radius:50%; border:1px solid var(--border);

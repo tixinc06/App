@@ -9,10 +9,13 @@
 // primary signal; the notification is a bonus when the platform allows it.
 import { el } from './ui.js';
 import { playSound } from './sound.js';
+import { requestWakeLock, releaseWakeLock } from './wakelock.js';
+import { sb } from './supabase.js';
+import { getUid } from './auth.js';
 
 const STATE_KEY = 'restTimerState';       // {endsAt, paused, pausedRemainingMs, durationMs}
 const DURATION_KEY = 'restTimerDuration'; // last-used seconds
-const RING_R = 20;
+const RING_R = 30;
 const RING_C = 2 * Math.PI * RING_R;
 
 let state = null;
@@ -45,6 +48,32 @@ function remainingMs() {
   return Math.max(0, new Date(state.endsAt).getTime() - Date.now());
 }
 
+// ── Server-scheduled completion push ────────────────────────────────────────
+// Fixes the real gap in the local timer: it's always ACCURATE, but if iOS
+// kills the app mid-rest, nothing fires the completion signal. A row here
+// (polled every 15s by a pg_cron job -> the "push" edge function's
+// `type:'scheduled'` branch) makes the alert arrive even with the app fully
+// closed. Every call is best-effort and never throws into the timer path —
+// the local countdown/vibrate/beep must keep working with no network, no
+// push permission, or a failed request.
+async function insertScheduledPush(fireAtIso) {
+  try {
+    const { data, error } = await sb.from('scheduled_pushes')
+      .insert({ user_id: getUid(), fire_at: fireAtIso, title: 'Rest finished 💪', body: 'Time to lift.', tag: 'rest-timer' })
+      .select('id').single();
+    if (error || !data) return null;
+    return data.id;
+  } catch { return null; }
+}
+async function deleteScheduledPush(id) {
+  if (!id) return;
+  try { await sb.from('scheduled_pushes').delete().eq('id', id); } catch { /* best-effort */ }
+}
+async function updateScheduledPushTime(id, fireAtIso) {
+  if (!id) return;
+  try { await sb.from('scheduled_pushes').update({ fire_at: fireAtIso }).eq('id', id); } catch { /* best-effort */ }
+}
+
 function fmt(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -52,8 +81,13 @@ function fmt(ms) {
 
 function render() {
   if (!barEl) return;
-  if (!state) { barEl.hidden = true; return; }
+  if (!state) {
+    barEl.hidden = true;
+    document.body.classList.remove('rt-active');
+    return;
+  }
   barEl.hidden = false;
+  document.body.classList.add('rt-active');
   const rem = remainingMs();
   timeEl.textContent = fmt(rem);
   pauseBtn.textContent = state.paused ? '▶' : '⏸';
@@ -118,22 +152,32 @@ export function requestNotifyPermission() {
 export function startRestTimer(seconds) {
   const durationMs = Math.max(0, Number(seconds) || 0) * 1000;
   saveLastDuration(Math.round(durationMs / 1000));
-  state = { endsAt: new Date(Date.now() + durationMs).toISOString(), paused: false, pausedRemainingMs: durationMs, durationMs };
+  state = { endsAt: new Date(Date.now() + durationMs).toISOString(), paused: false, pausedRemainingMs: durationMs, durationMs, pushId: null };
   persist();
   requestNotifyPermission();
+  requestWakeLock('resttimer');
   startTicking();
+  insertScheduledPush(state.endsAt).then(id => {
+    if (state && !state.pushId) { state.pushId = id; persist(); } // still the same rest (not skipped/finished while this was in flight)
+    else if (id) deleteScheduledPush(id); // the rest already ended before this landed — don't leave an orphan row
+  });
 }
 
 function togglePause() {
   if (!state) return;
+  const pushId = state.pushId;
   if (state.paused) {
     state.endsAt = new Date(Date.now() + state.pausedRemainingMs).toISOString();
     state.paused = false;
     armCompletionTimer();
+    state.pushId = null;
+    insertScheduledPush(state.endsAt).then(id => { if (state && !state.paused) { state.pushId = id; persist(); } });
   } else {
     state.pausedRemainingMs = remainingMs();
     state.paused = true;
     clearCompletionTimer();
+    state.pushId = null;
+    deleteScheduledPush(pushId); // no completion notification should fire while paused
   }
   persist();
   render();
@@ -142,24 +186,42 @@ function togglePause() {
 function addSeconds(sec) {
   if (!state) return;
   state.durationMs = Math.max(0, state.durationMs + sec * 1000);
-  if (state.paused) state.pausedRemainingMs = Math.max(0, state.pausedRemainingMs + sec * 1000);
-  else state.endsAt = new Date(new Date(state.endsAt).getTime() + sec * 1000).toISOString();
+  if (state.paused) {
+    state.pausedRemainingMs = Math.max(0, state.pausedRemainingMs + sec * 1000);
+  } else {
+    state.endsAt = new Date(new Date(state.endsAt).getTime() + sec * 1000).toISOString();
+    updateScheduledPushTime(state.pushId, state.endsAt);
+  }
   persist();
   render();
   if (!state.paused) armCompletionTimer();
 }
 
 function skip() {
+  const pushId = state?.pushId;
   state = null;
   persist();
   stopTicking();
+  releaseWakeLock('resttimer');
   render();
+  deleteScheduledPush(pushId);
+}
+
+// Exported for callers OUTSIDE this module that need to silently end a rest
+// in progress — specifically, saving/discarding a workout in js/fitness.js
+// (a finished workout leaving the rest bar running was a reported bug: the
+// only way to clear it was to leave and reopen the app). Identical to skip(),
+// just under a name that reads correctly from the caller's side.
+export function stopRestTimer() {
+  skip();
 }
 
 async function finish() {
+  const pushId = state?.pushId;
   stopTicking();
   state = null;
   persist();
+  releaseWakeLock('resttimer');
   render();
   try { navigator.vibrate?.([200, 100, 200]); } catch { /* unsupported */ }
   playSound('timer_done');
@@ -170,6 +232,10 @@ async function finish() {
       reg.showNotification('Rest finished 💪', { body: 'Time to lift.', tag: 'rest-timer', renotify: true });
     }
   } catch { /* best-effort — vibrate/beep already fired */ }
+  // The local completion signal just fired (this function running at all
+  // means the app was open) — cancel the server-scheduled one so it can
+  // never arrive as a duplicate a few seconds later.
+  deleteScheduledPush(pushId);
 }
 
 // A brief "Rest finished" toast-like flash — covers the case where the timer
@@ -193,7 +259,7 @@ export function mountRestTimer() {
   pauseBtn = el('button', { type: 'button', class: 'btn btn-sm btn-ghost rt-icon-btn', onClick: togglePause }, '⏸');
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('viewBox', '0 0 48 48');
+  svg.setAttribute('viewBox', '0 0 72 72');
   svg.setAttribute('class', 'rt-ring');
   const defs = document.createElementNS(svgNS, 'defs');
   const grad = document.createElementNS(svgNS, 'linearGradient');
@@ -208,10 +274,10 @@ export function mountRestTimer() {
   defs.append(grad);
   svg.append(defs);
   const track = document.createElementNS(svgNS, 'circle');
-  track.setAttribute('cx', '24'); track.setAttribute('cy', '24'); track.setAttribute('r', String(RING_R));
+  track.setAttribute('cx', '36'); track.setAttribute('cy', '36'); track.setAttribute('r', String(RING_R));
   track.setAttribute('class', 'rt-ring-track');
   const progress = document.createElementNS(svgNS, 'circle');
-  progress.setAttribute('cx', '24'); progress.setAttribute('cy', '24'); progress.setAttribute('r', String(RING_R));
+  progress.setAttribute('cx', '36'); progress.setAttribute('cy', '36'); progress.setAttribute('r', String(RING_R));
   progress.setAttribute('class', 'rt-ring-progress');
   progress.setAttribute('stroke-dasharray', String(RING_C));
   progress.setAttribute('stroke-dashoffset', '0');
@@ -238,6 +304,7 @@ export function mountRestTimer() {
       // rather than discarding it silently.
       finish();
     } else {
+      requestWakeLock('resttimer');
       startTicking();
     }
   }

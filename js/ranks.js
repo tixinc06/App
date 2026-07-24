@@ -11,6 +11,8 @@ import { el, num, emptyState, skeleton, staggerChildren } from './ui.js';
 import { divisionForRatio, globalIndexToLabel, GROUPS, DIVISIONS_PER_GROUP, TOTAL_DIVISIONS } from './standards.js';
 import { rankTile, pipRow, groupColor } from './rankart.js';
 import { fmtWeight } from './units.js';
+import { exerciseThumb } from './exercisemedia.js';
+import { renderExerciseDetail } from './exercisedetail.js';
 
 // A couple of major compounds count double toward the overall aggregate so a
 // handful of isolation lifts can't skew it.
@@ -134,7 +136,7 @@ export async function renderRanks(container, root) {
   if (!exerciseRanks.length) {
     container.append(emptyState('🏋️', 'Log workouts to start ranking your lifts.'));
   } else {
-    const list = el('div', { class: 'list' }, exerciseRanks.map(exerciseRankRow));
+    const list = el('div', { class: 'list' }, exerciseRanks.map(r => exerciseRankRow(r, container, root)));
     staggerChildren(list);
     container.append(list);
   }
@@ -226,11 +228,14 @@ function fullLadder(overall) {
   return grid;
 }
 
-function exerciseRankRow(r) {
+function exerciseRankRow(r, container, root) {
   const progressText = r.maxedOut ? 'Max division!' : `${(r.progressToNext * 100).toFixed(0)}% to ${r.nextLabel}`;
 
-  return el('div', { class: 'card item' }, [
-    el('div', { class: 'thumb' }, '🏋️'),
+  return el('div', {
+    class: 'card item',
+    onClick: () => renderExerciseDetail(container, root, r.exercise, () => renderRanks(container, root))
+  }, [
+    exerciseThumb(r.exercise, null, { size: 46 }),
     el('div', { class: 'grow' }, [
       el('div', { class: 'title' }, r.exercise),
       el('div', { class: 'sub' }, `${fmtWeight(r.e1rm)} e1RM · ${r.ratio.toFixed(2)}× bodyweight · ${progressText}`)

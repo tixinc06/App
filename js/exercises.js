@@ -10,6 +10,7 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, toast } from './ui.js';
+import { exerciseThumb } from './exercisemedia.js';
 
 export const PREMADE_EXERCISES = {
   Chest: [
@@ -185,7 +186,8 @@ export function attachExercisePicker(input) {
         class: 'ex-option',
         onMousedown: e => { e.preventDefault(); selectExercise(r.name); }
       }, [
-        el('span', {}, r.name),
+        exerciseThumb(r.name, r.group, { size: 36 }),
+        el('span', { class: 'grow' }, r.name),
         el('span', { class: 'ex-group-tag' }, r.group)
       ]));
     }

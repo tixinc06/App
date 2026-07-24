@@ -18,14 +18,16 @@ import { renderProgress, resetProfileView } from './progress.js';
 import { renderRanks, loadOverallRank } from './ranks.js';
 import { renderShop } from './shop.js';
 import { renderFriends } from './social.js';
-import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown } from './progression.js';
+import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown, estimatedE1RM } from './progression.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
 import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
-import { startRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
+import { startRestTimer, stopRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 import { plateCalculatorModal } from './platecalc.js';
 import { playSound } from './sound.js';
 import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
+import { exerciseThumb } from './exercisemedia.js';
+import { requestWakeLock, releaseWakeLock } from './wakelock.js';
 
 // Best set by estimated 1RM (Epley) — same convention used for PR detection
 // in js/progression.js. Used to anchor the progressive-overload hint.
@@ -149,7 +151,7 @@ async function renderTrainingLog(container, root) {
       ]),
       el('button', {
         type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
-        onClick: () => { discardWorkoutDraft(); renderTrainingLog(container, root); }
+        onClick: () => { discardWorkoutDraft(); stopRestTimer(); renderTrainingLog(container, root); }
       }, '✕')
     ]));
   }
@@ -220,7 +222,7 @@ async function renderTrainingLog(container, root) {
           title: 'Discard in-progress workout?',
           message: 'You have a workout in progress. Starting a new one will discard it.',
           confirmText: 'Discard & start new',
-          onConfirm: () => { discardWorkoutDraft(); workoutBuilder(root); }
+          onConfirm: () => { discardWorkoutDraft(); stopRestTimer(); workoutBuilder(root); }
         });
       } else {
         workoutBuilder(root);
@@ -253,10 +255,13 @@ function workoutRow(w, root) {
 export function viewWorkout(w, root) {
   const exs = Array.isArray(w.exercises) ? w.exercises : [];
   const body = exs.length ? exs.map(e =>
-    el('div', { style: 'margin-bottom:12px' }, [
-      el('div', { style: 'font-weight:700;margin-bottom:4px' }, e.name || 'Exercise'),
-      el('div', { class: 'muted', style: 'font-size:14px' },
-        (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}`).join('   ') || 'No sets')
+    el('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:12px' }, [
+      exerciseThumb(e.name, null, { size: 40 }),
+      el('div', { style: 'min-width:0' }, [
+        el('div', { style: 'font-weight:700;margin-bottom:4px' }, e.name || 'Exercise'),
+        el('div', { class: 'muted', style: 'font-size:14px' },
+          (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}`).join('   ') || 'No sets')
+      ])
     ])) : [el('p', { class: 'muted' }, 'No exercises recorded.')];
 
   openModal(el('div', {}, [
@@ -347,6 +352,15 @@ export function workoutBuilder(root, prefill) {
   let restSeconds = prefill?.restSeconds ?? loadLastDuration();
   const startedAt = prefill?.startedAt ?? Date.now();
 
+  // Best-effort, loaded once per builder session for the live in-session PR
+  // medal — a name -> stored best_e1rm(kg) map. Loading is async and may
+  // still be in flight when the first exercise's sets are typed; refreshMedal
+  // is re-run on every input anyway so it just catches up once this resolves.
+  const prMap = {};
+  sb.from('personal_records').select('exercise,best_e1rm').eq('user_id', getUid())
+    .then(({ data }) => { for (const r of (data || [])) prMap[(r.exercise || '').toLowerCase()] = Number(r.best_e1rm) || 0; })
+    .catch(() => {});
+
   let draftTimer = null;
   let draftFinalized = false; // set once the workout is actually saved — the
   // close-flush observer below must not resurrect a draft that was just
@@ -379,14 +393,78 @@ export function workoutBuilder(root, prefill) {
     const nameWrap = el('div', { style: 'flex:1;min-width:0' }, [nameInput]);
     attachExercisePicker(nameInput);
 
+    const thumbWrap = el('div', { style: 'flex:0 0 auto' }, [exerciseThumb(initialName, null, { size: 40 })]);
+    const prMedal = el('span', { class: 'pr-medal', style: 'flex:0 0 auto', hidden: true, title: 'New PR this session' }, '🏅');
+    function refreshThumb() {
+      thumbWrap.innerHTML = '';
+      thumbWrap.append(exerciseThumb(nameInput.value.trim(), null, { size: 40 }));
+    }
+    nameInput.addEventListener('input', refreshThumb);
+
+    // Per-set "last time" ghost values (B1) — resolved async by refreshHint
+    // below, then reapplied to every current row by applyPrevHints() so a
+    // set added before the fetch resolves still gets its hint once it lands.
+    let prevSets = null;
+    function applyPrevToRow(rowObj, i) {
+      const p = prevSets && prevSets[i];
+      if (p) {
+        const w = kgToDisplay(p.weight);
+        rowObj.weightInput.placeholder = String(Math.round(w * 10) / 10);
+        rowObj.repsInput.placeholder = String(p.reps);
+        rowObj.capEl.textContent = `Last: ${num(w)}${weightUnit()} × ${num(p.reps)}`;
+        rowObj.capEl.hidden = false;
+      } else {
+        rowObj.weightInput.placeholder = weightUnit();
+        rowObj.repsInput.placeholder = 'reps';
+        rowObj.capEl.hidden = true;
+      }
+    }
+    function applyPrevHints() {
+      sets.forEach((rowObj, i) => applyPrevToRow(rowObj, i));
+    }
+
+    // Live in-session PR medal (B2) — recomputed on every set edit from the
+    // CURRENT rows' best e1RM vs the stored PR loaded into prMap. This is a
+    // live indicator only; the authoritative write is still detectAndSavePRs
+    // on save (which is also skipped entirely during the XP cooldown), so the
+    // medal must never claim the PR is actually banked yet.
+    let medalSoundPlayed = false;
+    function refreshMedal() {
+      const key = nameInput.value.trim().toLowerCase();
+      if (!key) { prMedal.hidden = true; return; }
+      const storedBest = prMap[key] || 0;
+      let liveBest = 0;
+      for (const s of sets) {
+        const w = displayToKg(s.weightInput.value) || 0;
+        const r = Number(s.repsInput.value) || 0;
+        const e1rm = estimatedE1RM(w, r);
+        if (e1rm > liveBest) liveBest = e1rm;
+      }
+      const beats = liveBest > 0 && liveBest > storedBest;
+      prMedal.hidden = !beats;
+      if (beats) {
+        if (!medalSoundPlayed) {
+          medalSoundPlayed = true;
+          playSound('pr');
+          prMedal.classList.remove('pr-medal-pop'); void prMedal.offsetWidth; prMedal.classList.add('pr-medal-pop');
+        }
+      } else {
+        medalSoundPlayed = false;
+      }
+    }
+
     const hintEl = el('div', { style: 'margin-top:6px', hidden: true });
     let hintTimer = null;
     function refreshHint() {
       clearTimeout(hintTimer);
       const name = nameInput.value.trim();
-      if (!name) { hintEl.hidden = true; return; }
+      medalSoundPlayed = false;
+      refreshMedal();
+      if (!name) { hintEl.hidden = true; prevSets = null; applyPrevHints(); return; }
       hintTimer = setTimeout(async () => {
         const prev = await loadPreviousPerformance(name);
+        prevSets = prev ? prev.sets : null;
+        applyPrevHints();
         if (!prev) { hintEl.hidden = true; return; }
         hintEl.innerHTML = '';
         // prev.sets come straight from the stored workouts.exercises JSONB —
@@ -425,7 +503,8 @@ export function workoutBuilder(root, prefill) {
     function addSet(weight = '', reps = '', ticked = false) {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: String(weightStep()), placeholder: weightUnit(), value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
-      const rowObj = { weightInput: wI, repsInput: rI, ticked };
+      const capEl = el('div', { class: 'set-prev', hidden: true });
+      const rowObj = { weightInput: wI, repsInput: rI, ticked, capEl };
       const tickBtn = el('button', {
         type: 'button', class: 'set-tick' + (ticked ? ' ticked' : ''), title: 'Mark set done (starts rest timer)',
         onClick: () => {
@@ -435,15 +514,22 @@ export function workoutBuilder(root, prefill) {
           scheduleDraftSave();
         }
       }, '✓');
-      const row = el('div', { class: 'row', style: 'margin-bottom:8px;align-items:center' }, [
-        tickBtn, wI, rI,
-        el('button', {
-          type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
-          onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); scheduleDraftSave(); }
-        }, '✕')
+      wI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
+      rI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
+      const row = el('div', { style: 'margin-bottom:8px' }, [
+        el('div', { class: 'row', style: 'align-items:center' }, [
+          tickBtn, wI, rI,
+          el('button', {
+            type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
+            onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); scheduleDraftSave(); refreshMedal(); }
+          }, '✕')
+        ]),
+        capEl
       ]);
       sets.push(rowObj);
       setsWrap.append(row);
+      applyPrevToRow(rowObj, sets.indexOf(rowObj));
+      refreshMedal();
     }
     // `initialSets` is either a plain count (template prefill — empty rows)
     // or an array of {weight,reps,ticked} (draft restore — exact values).
@@ -453,10 +539,12 @@ export function workoutBuilder(root, prefill) {
       for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
     }
 
-    const exObj = { nameInput, sets };
+    const exObj = { nameInput, sets, prMedal };
     const node = el('div', { class: 'card', style: 'padding:14px;margin-bottom:12px' }, [
-      el('div', { class: 'row', style: 'align-items:center' }, [
+      el('div', { class: 'row', style: 'align-items:center;gap:10px' }, [
+        thumbWrap,
         nameWrap,
+        prMedal,
         el('button', {
           type: 'button', class: 'btn btn-sm btn-danger', style: 'flex:0 0 auto',
           onClick: () => { const i = state.indexOf(exObj); if (i > -1) state.splice(i, 1); node.remove(); scheduleDraftSave(); }
@@ -514,6 +602,9 @@ export function workoutBuilder(root, prefill) {
       draftFinalized = true;
       discardWorkoutDraft();
       closeModal();
+      // Reported bug: the rest bar kept running after a workout was saved —
+      // the only fix was leaving and reopening the app. Stop it explicitly.
+      stopRestTimer();
 
       // The whole progression pipeline (PR/goal detection, achievement
       // unlocks, XP/Plate award) is skipped entirely while on cooldown —
@@ -702,9 +793,12 @@ export function workoutBuilder(root, prefill) {
   const closeObserver = new MutationObserver(() => {
     if (host.hidden) {
       saveDraftNow();
+      releaseWakeLock('workout');
       closeObserver.disconnect();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     }
   });
   closeObserver.observe(host, { attributes: true, attributeFilter: ['hidden'] });
+
+  requestWakeLock('workout');
 }

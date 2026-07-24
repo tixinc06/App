@@ -14,7 +14,8 @@ import { VAPID_PUBLIC } from './config.js';
 export const NOTIF_TYPES = [
   { key: 'messages', label: 'New messages' },
   { key: 'friend_requests', label: 'Friend requests' },
-  { key: 'streak', label: 'Streak reminders' }
+  { key: 'streak', label: 'Streak reminders' },
+  { key: 'rest', label: 'Rest timer finished' }
 ];
 
 export function isPushSupported() {
@@ -70,8 +71,15 @@ export async function disablePush() {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (sub) {
-    await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint).catch(() => {});
-    await sub.unsubscribe().catch(() => {});
+    // BUG (reported "notifications don't work properly"): a Supabase
+    // PostgrestFilterBuilder is thenable (has .then) but does NOT implement
+    // .catch — calling .catch() on it directly throws a TypeError, which
+    // means this delete ALWAYS failed silently before reaching unsubscribe(),
+    // the row was never removed, and the toggle never actually turned off.
+    // Plain try/catch around a normal await is the fix (same class of bug
+    // that broke the Home dashboard's initial load in Round 6).
+    try { await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); } catch { /* best-effort */ }
+    try { await sub.unsubscribe(); } catch { /* best-effort */ }
   }
 }
 
@@ -84,8 +92,17 @@ export async function loadNotifPrefs() {
   return merged;
 }
 
+// Merges into whatever is already stored rather than blind-replacing the
+// whole JSONB blob — `prefs` here only ever carries the NOTIF_TYPES keys this
+// module manages, so a plain overwrite would silently erase any other key
+// sharing the same notif_prefs column (defensive; nothing else writes into
+// it today, but a blind replace on a shared JSONB column is a landmine to
+// leave behind).
 export async function saveNotifPrefs(prefs) {
+  const uid = getUid();
+  const { data: existing } = await sb.from('user_settings').select('notif_prefs').eq('user_id', uid).maybeSingle();
+  const merged = { ...(existing?.notif_prefs || {}), ...prefs };
   const { error } = await sb.from('user_settings')
-    .upsert({ user_id: getUid(), notif_prefs: prefs }, { onConflict: 'user_id' });
+    .upsert({ user_id: uid, notif_prefs: merged }, { onConflict: 'user_id' });
   if (error) throw error;
 }

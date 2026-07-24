@@ -150,8 +150,11 @@ export async function prestige() {
 }
 
 // ── Personal records ─────────────────────────────────────────────────────────
-// Epley formula: a standard, widely-used estimated-1RM approximation.
-function estimatedE1RM(weight, reps) {
+// Epley formula: a standard, widely-used estimated-1RM approximation. Exported
+// so the live in-session PR medal (js/fitness.js) and the exercise detail
+// page's history chart (js/exercisedetail.js) share the exact same formula
+// the authoritative save-time PR detection below uses.
+export function estimatedE1RM(weight, reps) {
   if (!weight || !reps) return 0;
   return weight * (1 + reps / 30);
 }
