@@ -223,13 +223,18 @@ async function finish() {
   persist();
   releaseWakeLock('resttimer');
   render();
-  try { navigator.vibrate?.([200, 100, 200]); } catch { /* unsupported */ }
+  // navigator.vibrate is Android-only — it doesn't exist in iOS Safari at
+  // all (feature-detected via the optional chain). A clear double-buzz.
+  try { navigator.vibrate?.([350, 120, 350]); } catch { /* unsupported */ }
   playSound('timer_done');
   flashFinished();
   try {
     if ('serviceWorker' in navigator && window.Notification?.permission === 'granted') {
       const reg = await navigator.serviceWorker.ready;
-      reg.showNotification('Rest finished 💪', { body: 'Time to lift.', tag: 'rest-timer', renotify: true });
+      reg.showNotification('Rest finished 💪', {
+        body: 'Time to lift.', tag: 'rest-timer', renotify: true,
+        vibrate: [350, 120, 350], silent: false // honoured on Android; ignored on iOS
+      });
     }
   } catch { /* best-effort — vibrate/beep already fired */ }
   // The local completion signal just fired (this function running at all
@@ -238,14 +243,16 @@ async function finish() {
   deleteScheduledPush(pushId);
 }
 
-// A brief "Rest finished" toast-like flash — covers the case where the timer
-// expired while the app was backgrounded/closed and the bar simply vanished
-// (see mountRestTimer): the user still gets a clear signal on return.
+// A brief full-screen flash — covers the case where the timer expired while
+// the app was backgrounded/closed and the bar simply vanished (see
+// mountRestTimer), and doubles as the most visible signal available on a
+// silenced iPhone (sound may not be audible, vibration doesn't exist on iOS
+// at all — this is guaranteed to render regardless of platform limits).
 function flashFinished() {
-  const flash = el('div', { class: 'rt-finished-flash' }, '💪 Rest finished');
+  const flash = el('div', { class: 'rt-finished-flash' }, [el('div', { class: 'rt-finished-text' }, '💪 Rest finished')]);
   document.body.append(flash);
   requestAnimationFrame(() => flash.classList.add('show'));
-  setTimeout(() => { flash.classList.remove('show'); setTimeout(() => flash.remove(), 300); }, 2200);
+  setTimeout(() => { flash.classList.remove('show'); setTimeout(() => flash.remove(), 300); }, 1400);
 }
 
 // Mounts the floating bar once, at app-shell level (call from js/app.js after

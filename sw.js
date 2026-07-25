@@ -3,7 +3,7 @@
 // Strategy: network-first for ALL same-origin requests (so code edits/deploys
 // always land when online), falling back to the cache only when offline. This
 // avoids stale-JavaScript bugs after a deploy.
-const CACHE = 'tracker-v23';
+const CACHE = 'tracker-v24';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/styles.css',
@@ -85,6 +85,12 @@ self.addEventListener('push', e => {
       badge: './icons/icon-192.png',
       tag: payload.tag || 'tracker-push',
       renotify: true,
+      // vibrate is honoured on Android, ignored on iOS (which has no
+      // Vibration API and never plays notification sound for a PWA —
+      // both hard platform limits, not bugs). silent:false just makes the
+      // intent explicit rather than relying on the (silent) default.
+      vibrate: payload.vibrate || [300, 120, 300],
+      silent: false,
       data: { url }
     })
   );

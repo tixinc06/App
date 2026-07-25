@@ -105,6 +105,16 @@ function wireZoomPrevention() {
   document.addEventListener('gesturechange', prevent);
 }
 
+// Reported bug: an edge swipe during a live workout would navigate Home, and
+// pull-to-refresh's `window.scrollY <= 0` check is permanently true whenever
+// a modal is open (the page body never scrolls then — the modal scrolls
+// internally), so scrolling down inside a live workout could trigger a
+// refresh. Both gestures are gated off entirely while any modal is open.
+function modalOpen() {
+  const host = document.getElementById('modal-host');
+  return !!host && !host.hidden;
+}
+
 function wireGestures() {
   const pullIndicator = el('div', { class: 'pull-indicator' }, '↓');
   document.body.append(pullIndicator);
@@ -115,13 +125,14 @@ function wireGestures() {
   window.addEventListener('touchstart', e => {
     const t = e.touches[0];
     startX = t.clientX; startY = t.clientY;
-    trackingBack = !!activeSection && startX < 28;
-    trackingPull = window.scrollY <= 0;
+    trackingBack = !!activeSection && startX < 28 && !modalOpen();
+    trackingPull = window.scrollY <= 0 && !modalOpen();
     pullDist = 0;
   }, { passive: true });
 
   window.addEventListener('touchmove', e => {
     if (!trackingPull) return;
+    if (modalOpen()) { trackingPull = false; pullIndicator.classList.remove('show'); pullIndicator.style.transform = ''; return; }
     const t = e.touches[0];
     const dy = t.clientY - startY;
     const dx = Math.abs(t.clientX - startX);
@@ -133,14 +144,14 @@ function wireGestures() {
   }, { passive: true });
 
   window.addEventListener('touchend', e => {
-    if (trackingBack) {
+    if (trackingBack && !modalOpen()) {
       const t = e.changedTouches[0];
       const dx = t.clientX - startX, dy = t.clientY - startY;
       if (dx > 70 && Math.abs(dy) < 60) goHome();
     }
     trackingBack = false;
 
-    if (trackingPull && pullDist > 55) {
+    if (trackingPull && !modalOpen() && pullDist > 55) {
       pullIndicator.classList.add('loading');
       pullIndicator.style.transform = '';
       refreshActive().finally(() => {
