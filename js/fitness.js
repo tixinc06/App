@@ -30,10 +30,12 @@ import { exerciseThumb } from './exercisemedia.js';
 import { requestWakeLock, releaseWakeLock } from './wakelock.js';
 
 // Best set by estimated 1RM (Epley) — same convention used for PR detection
-// in js/progression.js. Used to anchor the progressive-overload hint.
+// in js/progression.js. Used to anchor the progressive-overload hint. Warm-up
+// sets are excluded so a heavy warm-up single can't inflate the suggestion.
 function bestSetOf(sets) {
   let best = null, bestE1rm = 0;
   for (const s of (sets || [])) {
+    if (s.warmup) continue;
     const e1rm = (Number(s.weight) || 0) * (1 + (Number(s.reps) || 0) / 30);
     if (e1rm > bestE1rm) { bestE1rm = e1rm; best = s; }
   }
@@ -260,7 +262,7 @@ export function viewWorkout(w, root) {
       el('div', { style: 'min-width:0' }, [
         el('div', { style: 'font-weight:700;margin-bottom:4px' }, e.name || 'Exercise'),
         el('div', { class: 'muted', style: 'font-size:14px' },
-          (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}`).join('   ') || 'No sets')
+          (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}${s.warmup ? ' (w)' : ''}`).join('   ') || 'No sets')
       ])
     ])) : [el('p', { class: 'muted' }, 'No exercises recorded.')];
 
@@ -377,7 +379,7 @@ export function workoutBuilder(root, prefill) {
       restSeconds, startedAt,
       exercises: state.map(e => ({
         name: e.nameInput.value,
-        sets: e.sets.map(s => ({ weight: s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked }))
+        sets: e.sets.map(s => ({ weight: s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked, warmup: s.warmup }))
       }))
     };
     const hasContent = draft.name.trim() ||
@@ -435,6 +437,7 @@ export function workoutBuilder(root, prefill) {
       const storedBest = prMap[key] || 0;
       let liveBest = 0;
       for (const s of sets) {
+        if (s.warmup) continue; // a warm-up set should never trigger the PR medal
         const w = displayToKg(s.weightInput.value) || 0;
         const r = Number(s.repsInput.value) || 0;
         const e1rm = estimatedE1RM(w, r);
@@ -500,11 +503,11 @@ export function workoutBuilder(root, prefill) {
     nameInput.addEventListener('input', refreshHint);
     if (initialName) refreshHint();
 
-    function addSet(weight = '', reps = '', ticked = false) {
+    function addSet(weight = '', reps = '', ticked = false, warmup = false) {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: String(weightStep()), placeholder: weightUnit(), value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
       const capEl = el('div', { class: 'set-prev', hidden: true });
-      const rowObj = { weightInput: wI, repsInput: rI, ticked, capEl };
+      const rowObj = { weightInput: wI, repsInput: rI, ticked, warmup, capEl };
       const tickBtn = el('button', {
         type: 'button', class: 'set-tick' + (ticked ? ' ticked' : ''), title: 'Mark set done (starts rest timer)',
         onClick: () => {
@@ -514,11 +517,21 @@ export function workoutBuilder(root, prefill) {
           scheduleDraftSave();
         }
       }, '✓');
+      const warmupBtn = el('button', {
+        type: 'button', class: 'set-warmup' + (warmup ? ' active' : ''),
+        title: 'Mark as a warm-up set (excluded from PRs, ranks and the PR medal)',
+        onClick: () => {
+          rowObj.warmup = !rowObj.warmup;
+          warmupBtn.classList.toggle('active', rowObj.warmup);
+          refreshMedal();
+          scheduleDraftSave();
+        }
+      }, 'W');
       wI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
       rI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
       const row = el('div', { style: 'margin-bottom:8px' }, [
         el('div', { class: 'row', style: 'align-items:center' }, [
-          tickBtn, wI, rI,
+          tickBtn, warmupBtn, wI, rI,
           el('button', {
             type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
             onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); scheduleDraftSave(); refreshMedal(); }
@@ -532,9 +545,9 @@ export function workoutBuilder(root, prefill) {
       refreshMedal();
     }
     // `initialSets` is either a plain count (template prefill — empty rows)
-    // or an array of {weight,reps,ticked} (draft restore — exact values).
+    // or an array of {weight,reps,ticked,warmup} (draft restore — exact values).
     if (Array.isArray(initialSets)) {
-      for (const s of initialSets) addSet(s.weight, s.reps, !!s.ticked);
+      for (const s of initialSets) addSet(s.weight, s.reps, !!s.ticked, !!s.warmup);
     } else {
       for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
     }
@@ -584,7 +597,7 @@ export function workoutBuilder(root, prefill) {
       .map(e => ({
         name: e.nameInput.value.trim(),
         sets: e.sets
-          .map(s => ({ weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0 }))
+          .map(s => ({ weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0, warmup: !!s.warmup }))
           .filter(s => s.reps > 0 || s.weight > 0)
       }))
       .filter(e => e.name || e.sets.length);

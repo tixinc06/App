@@ -247,8 +247,14 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
   display:grid; place-items:center; font-size:15px; cursor:pointer; transition:all .15s ease}
 .set-tick.ticked{background:var(--green); border-color:var(--green); color:#06231a}
 
+/* ── Warm-up set toggle ───────────────────────────────────────────────────── */
+.set-warmup{flex:0 0 auto; width:34px; height:34px; border-radius:50%;
+  border:1px solid var(--border); background:var(--bg2); color:var(--muted);
+  display:grid; place-items:center; font-size:13px; font-weight:800; cursor:pointer; transition:all .15s ease}
+.set-warmup.active{background:var(--amber); border-color:var(--amber); color:#3a2200}
+
 /* ── Per-set "last time" ghost hint (B1) ─────────────────────────────────── */
-.set-prev{font-size:11px; color:var(--muted-dim); margin:2px 2px 0 44px}
+.set-prev{font-size:11px; color:var(--muted-dim); margin:2px 2px 0 82px}
 
 /* ── Live in-session PR medal (B2) ───────────────────────────────────────── */
 .pr-medal{font-size:20px; line-height:1}

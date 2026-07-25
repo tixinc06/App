@@ -169,6 +169,7 @@ export async function detectAndSavePRs(exercises) {
     if (!ex.name || !ex.sets?.length) continue;
     let bestSet = null, bestE1rm = 0;
     for (const s of ex.sets) {
+      if (s.warmup) continue; // a warm-up set must never count as a PR
       const e1rm = estimatedE1RM(Number(s.weight) || 0, Number(s.reps) || 0);
       if (e1rm > bestE1rm) { bestE1rm = e1rm; bestSet = s; }
     }
