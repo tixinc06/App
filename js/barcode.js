@@ -166,13 +166,31 @@ export function scanBarcodeModal() {
       }
     }
 
+    // BUG FIX (reported "registering the wrong food" — e.g. showing 57 kcal
+    // for a product that's actually 127 kcal/100g): both scanners previously
+    // accepted the FIRST decoded value from a single video frame. A single
+    // misread frame — glare, motion blur, a second barcode partly in shot —
+    // can decode to a completely different, validly-formatted barcode, which
+    // then returns another product's genuinely-correct-for-ITSELF nutrition
+    // data. That reads as "wrong numbers," but the real defect is accepting
+    // an unconfirmed single read. Fixed by requiring the SAME value to be
+    // decoded CONSECUTIVE_MATCHES times in a row before it's trusted — one
+    // bad frame can no longer decide the result on its own.
+    const CONSECUTIVE_MATCHES = 2;
+    let lastCode = null, matchCount = 0;
+    function considerCode(value) {
+      if (value === lastCode) matchCount++;
+      else { lastCode = value; matchCount = 1; }
+      if (matchCount >= CONSECUTIVE_MATCHES) finish(value);
+    }
+
     async function detectWithNative(formats) {
       const detector = new window.BarcodeDetector({ formats });
       const loop = async () => {
         if (stopLoop) return;
         try {
           const codes = await detector.detect(video);
-          if (codes.length) { finish(codes[0].rawValue); return; }
+          if (codes.length) { considerCode(codes[0].rawValue); if (settled) return; }
         } catch { /* keep trying — a failed single frame isn't fatal */ }
         requestAnimationFrame(loop);
       };
@@ -187,7 +205,7 @@ export function scanBarcodeModal() {
       // a scanner failure, just "nothing decodable in this frame").
       zxingReader.decodeFromStream(stream, video, (result, err) => {
         if (stopLoop) return;
-        if (result) { finish(result.getText()); return; }
+        if (result) { considerCode(result.getText()); return; }
         // Every frame with no code in it fires this callback with a
         // NotFoundException — that's normal, not a failure. Checking
         // `instanceof` rather than `err.name` matters: this minified UMD
@@ -217,10 +235,17 @@ export async function lookupBarcode(barcode) {
     if (json.status !== 1 || !json.product) return null;
     const n = json.product.nutriments || {};
     const name = [json.product.product_name, json.product.brands].filter(Boolean).join(' — ') || 'Scanned item';
+    // Some products only have the raw kJ field populated, not the derived
+    // kcal one — falling straight to `|| 0` there would silently show 0
+    // calories for a real product. Convert from kJ (1 kcal = 4.184 kJ) when
+    // the direct kcal field is missing.
+    const kcal100g = n['energy-kcal_100g'] != null
+      ? Number(n['energy-kcal_100g'])
+      : (n.energy_100g != null ? Number(n.energy_100g) / 4.184 : 0);
     return {
       name,
       serving_desc: json.product.serving_size || '100g',
-      calories: Math.round(n['energy-kcal_100g'] || 0),
+      calories: Math.round(kcal100g || 0),
       protein: Number(n.proteins_100g) || 0,
       carbs: Number(n.carbohydrates_100g) || 0,
       fat: Number(n.fat_100g) || 0,
