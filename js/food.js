@@ -166,11 +166,44 @@ async function scanAndHandle(root) {
 
   const hit = await lookupBarcode(barcode);
   if (hit) {
-    addFoodForm(root, () => renderFood(root), hit);
+    // Reported bug: a bad scan or a stale/wrong Open Food Facts entry could
+    // silently save the wrong product's nutrition. Show what was matched
+    // before it goes anywhere near the food form, so a wrong match gets
+    // caught here instead of turning into a bad log entry.
+    const confirmed = await confirmScannedProduct(hit);
+    if (confirmed) addFoodForm(root, () => renderFood(root), hit);
+    else addFoodForm(root, () => renderFood(root), { barcode });
   } else {
     toast('Not found on Open Food Facts — add it manually', '');
     addFoodForm(root, () => renderFood(root), { barcode });
   }
+}
+
+// Shows the matched product (name + per-100g/serving macros) before it goes
+// anywhere near the food form. Resolves true if the user confirms it's the
+// right item, false if they say it's wrong (falls back to manual entry with
+// the barcode kept, same as a lookup miss) — catches a bad scan or a
+// stale/wrong Open Food Facts entry before it becomes a saved log entry.
+function confirmScannedProduct(hit) {
+  return new Promise(resolve => {
+    let settled = false;
+    const settle = v => { if (!settled) { settled = true; resolve(v); } };
+    openModal(el('div', {}, [
+      el('h3', {}, 'Is this right?'),
+      el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:16px' }, [
+        el('div', { style: 'font-weight:700;margin-bottom:6px' }, hit.name),
+        el('div', { class: 'dim', style: 'font-size:13px' },
+          `${num(hit.calories)} cal · P ${num(hit.protein)} · C ${num(hit.carbs)} · F ${num(hit.fat)}g — per ${hit.serving_desc}`)
+      ]),
+      el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:8px', onClick: () => { closeModal(); settle(true); } }, '✓ Yes, that\'s it'),
+      el('button', { class: 'btn btn-ghost btn-block', onClick: () => { closeModal(); settle(false); } }, '✕ Not this — enter manually')
+    ]));
+    // Closing via ✕/backdrop without picking either button — treat as "not
+    // this" rather than silently accepting an unconfirmed match.
+    const host = document.getElementById('modal-host');
+    const observer = new MutationObserver(() => { if (host.hidden) { observer.disconnect(); settle(false); } });
+    observer.observe(host, { attributes: true, attributeFilter: ['hidden'] });
+  });
 }
 
 // ── Water tracking ──
