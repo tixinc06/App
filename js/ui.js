@@ -70,6 +70,15 @@ export function toast(msg, type = '') {
 // A generation counter guards against a delayed close (from an animation) hiding
 // a DIFFERENT modal that was opened again before the close animation finished.
 let modalGen = 0;
+// Exposed so a caller can tell whether the modal identity changed out from
+// under it — see confirmModal()'s use below, which fixes a real bug: an
+// onConfirm that itself opens a new modal (e.g. workoutBuilder) would
+// otherwise get closed immediately by confirmModal's own trailing
+// closeModal() call, since that call has no idea a different modal is now
+// showing.
+export function currentModalGen() {
+  return modalGen;
+}
 export function closeModal() {
   const h = document.getElementById('modal-host');
   if (h.hidden) return;
@@ -160,7 +169,17 @@ export function confirmModal({ title = 'Are you sure?', message = '', confirmTex
   const no = el('button', { class: 'btn btn-ghost', onClick: closeModal }, 'Cancel');
   yes.addEventListener('click', async () => {
     yes.disabled = true; yes.textContent = 'Working…';
-    try { await onConfirm(); closeModal(); }
+    // BUG FIX: if onConfirm() itself opens a new modal (e.g. workoutBuilder
+    // re-opening after a "discard draft" confirm), this trailing closeModal()
+    // used to close THAT modal instead of this one — closeModal() has no way
+    // to know the modal underneath it has changed. Capturing the generation
+    // before onConfirm runs and skipping the auto-close if it changed fixes
+    // it without touching every onConfirm caller.
+    const genBefore = currentModalGen();
+    try {
+      await onConfirm();
+      if (currentModalGen() === genBefore) closeModal();
+    }
     catch (ex) { toast(ex.message || 'Failed', 'err'); yes.disabled = false; yes.textContent = confirmText; }
   });
   openModal(el('div', {}, [
