@@ -27,6 +27,10 @@ export function applyTheme(code) {
   root.setProperty('--bg2', theme.colors.bg2);
   root.setProperty('--primary-rgb', hexToRgbString(theme.colors.primary));
   root.setProperty('--accent2-rgb', hexToRgbString(theme.colors.accent2));
+  // Foreground for anything painted on top of --primary (buttons, FAB, the
+  // segmented indicator, own chat bubbles). Falls back to white for older
+  // theme data that predates this field.
+  root.setProperty('--on-primary', theme.colors.onPrimary || '#ffffff');
 }
 
 // Load the signed-in user's equipped theme and apply it. Called once at app

@@ -33,17 +33,22 @@ export function xpForMasterLevel(level) {
 // flair (shown on the Progress tab). Boosters are instant-use: buying one
 // immediately activates a temporary XP multiplier (read by progression.award).
 export const SHOP_ITEMS = {
+  // `onPrimary` is the foreground colour for anything painted ON TOP of
+  // `primary` (buttons, the FAB, the segmented indicator, own chat bubbles) —
+  // read by js/theme.js's applyTheme() into --on-primary. Mono Neon's primary
+  // is near-white, so it needs dark text there instead of the white every
+  // other (coloured) theme uses.
   themes: [
-    { code: 'default', name: 'Default', price: 0,
-      colors: { primary: '#6d5efc', primarySoft: '#9b8dff', bg: '#0b0b12', bg2: '#11111b', accent2: '#3fb6f0' } },
+    { code: 'default', name: 'Mono Neon', price: 0,
+      colors: { primary: '#f2f2f7', primarySoft: '#ffffff', bg: '#08080c', bg2: '#101016', accent2: '#c9c9d6', onPrimary: '#08080c' } },
     { code: 'crimson', name: 'Black & Red', price: 300,
-      colors: { primary: '#ff3b3b', primarySoft: '#ff6b6b', bg: '#0a0a0a', bg2: '#141414', accent2: '#ff8a3d' } },
+      colors: { primary: '#ff3b3b', primarySoft: '#ff6b6b', bg: '#0a0a0a', bg2: '#141414', accent2: '#ff8a3d', onPrimary: '#ffffff' } },
     { code: 'emerald', name: 'Emerald', price: 300,
-      colors: { primary: '#1fd48c', primarySoft: '#5ce8ac', bg: '#07120d', bg2: '#0d1a14', accent2: '#22c7e0' } },
+      colors: { primary: '#1fd48c', primarySoft: '#5ce8ac', bg: '#07120d', bg2: '#0d1a14', accent2: '#22c7e0', onPrimary: '#ffffff' } },
     { code: 'gold', name: 'Royal Gold', price: 500,
-      colors: { primary: '#ffb347', primarySoft: '#ffd08a', bg: '#120d05', bg2: '#1a140a', accent2: '#ff5a36' } },
+      colors: { primary: '#ffb347', primarySoft: '#ffd08a', bg: '#120d05', bg2: '#1a140a', accent2: '#ff5a36', onPrimary: '#ffffff' } },
     { code: 'arctic', name: 'Arctic Blue', price: 300,
-      colors: { primary: '#3fb6f0', primarySoft: '#7fd4ff', bg: '#060d12', bg2: '#0c1620', accent2: '#9b8dff' } }
+      colors: { primary: '#3fb6f0', primarySoft: '#7fd4ff', bg: '#060d12', bg2: '#0c1620', accent2: '#9b8dff', onPrimary: '#ffffff' } }
   ],
   banners: [
     { code: 'flame', name: 'Flame', price: 200, gradient: 'linear-gradient(135deg,#ff5a36,#ffb347)' },

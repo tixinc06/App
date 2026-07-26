@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Tracker">
-<meta name="theme-color" content="#0b0b12">
+<meta name="apple-mobile-web-app-title" content="Improvement">
+<meta name="theme-color" content="#08080c">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<title>Tracker</title>
+<title>Improvement</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -19,9 +19,32 @@
 </head>
 <body>
 
-<!-- App-open splash (fades out once we know which screen to show) -->
+<!-- App-open splash (fades out once we know which screen to show). The mark
+     is inlined as SVG (not <img>) so its three chevrons can build in one at a
+     time via CSS, rather than popping in as one flat image. -->
 <div id="splash">
-  <div class="splash-logo"><img src="icons/icon.svg" alt="" width="72" height="72"></div>
+  <div class="splash-logo">
+    <svg viewBox="0 0 512 512" class="splash-mark" width="96" height="96" aria-hidden="true">
+      <rect width="512" height="512" rx="112" fill="#08080c"/>
+      <rect x="6" y="6" width="500" height="500" rx="108" fill="none" stroke="#fff" stroke-width="4" opacity=".18"/>
+      <g class="splash-chevron splash-chevron-1" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M150 420 L256 314 L362 420" stroke-width="76" opacity=".05"/>
+        <path d="M150 420 L256 314 L362 420" stroke-width="56" opacity=".10"/>
+        <path d="M150 420 L256 314 L362 420" stroke-width="40" opacity=".38"/>
+      </g>
+      <g class="splash-chevron splash-chevron-2" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M150 330 L256 224 L362 330" stroke-width="76" opacity=".07"/>
+        <path d="M150 330 L256 224 L362 330" stroke-width="56" opacity=".16"/>
+        <path d="M150 330 L256 224 L362 330" stroke-width="40" opacity=".68"/>
+      </g>
+      <g class="splash-chevron splash-chevron-3" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M150 240 L256 134 L362 240" stroke-width="86" opacity=".12"/>
+        <path d="M150 240 L256 134 L362 240" stroke-width="62" opacity=".26"/>
+        <path d="M150 240 L256 134 L362 240" stroke-width="40" opacity="1"/>
+      </g>
+    </svg>
+  </div>
+  <div class="splash-wordmark">IMPROVEMENT</div>
 </div>
 
 <!-- Setup notice (shown when config.js still has placeholder values) -->
@@ -42,7 +65,7 @@
   <div class="card auth-card">
     <div class="brand">
       <img src="icons/icon.svg" alt="" width="44" height="44">
-      <h1>Tracker</h1>
+      <h1>Improvement</h1>
     </div>
     <p class="auth-sub">Reselling &amp; fitness, in one place.</p>
     <form id="auth-form" autocomplete="on">

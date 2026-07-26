@@ -949,3 +949,8 @@ ALTER TABLE scheduled_pushes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own scheduled_pushes" ON scheduled_pushes
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_due ON scheduled_pushes (fire_at) WHERE sent_at IS NULL;
+
+-- ── Round 10: food favourites + saved workout duration.
+-- See migration-round10.sql.
+ALTER TABLE foods ADD COLUMN IF NOT EXISTS favourite BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE workouts ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;

@@ -1,4 +1,4 @@
-# Tracker — Reselling & Fitness PWA
+# Improvement — Reselling & Fitness PWA
 
 A single installable web app (PWA) to track reselling inventory & profit, food macros,
 and workouts. Plain HTML/CSS/JS + Supabase (auth + database). No build step.

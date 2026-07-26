@@ -280,7 +280,7 @@ function maybeShowWelcome() {
     { icon: '👥', name: 'Friends', sub: 'Compare & share progress' }
   ];
   openModal(el('div', {}, [
-    el('h3', {}, '👋 Welcome to Tracker'),
+    el('h3', {}, '👋 Welcome to Improvement'),
     el('p', { class: 'muted', style: 'margin-bottom:14px' },
       'One private app for reselling, food, and fitness — plus friends to compare progress with.'),
     el('div', { class: 'list', style: 'margin-bottom:16px' }, sections.map(s =>

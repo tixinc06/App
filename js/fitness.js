@@ -266,9 +266,13 @@ export function viewWorkout(w, root) {
       ])
     ])) : [el('p', { class: 'muted' }, 'No exercises recorded.')];
 
+  const durationText = w.duration_seconds != null
+    ? ` · ${Math.floor(w.duration_seconds / 60)}:${String(w.duration_seconds % 60).padStart(2, '0')}`
+    : '';
+
   openModal(el('div', {}, [
     el('h3', {}, w.name || 'Workout'),
-    el('div', { class: 'dim', style: 'margin-bottom:14px' }, fmtDate(w.workout_date)),
+    el('div', { class: 'dim', style: 'margin-bottom:14px' }, fmtDate(w.workout_date) + durationText),
     ...body,
     w.notes ? el('p', { class: 'muted', style: 'margin-top:8px' }, w.notes) : null,
     el('div', { class: 'modal-actions', style: 'margin-top:18px' }, [
@@ -609,7 +613,8 @@ export function workoutBuilder(root, prefill) {
         workout_date: dateInput.value || todayISO(),
         name: nameInput.value.trim(),
         notes: notesInput.value.trim(),
-        exercises
+        exercises,
+        duration_seconds: Math.max(0, Math.round((Date.now() - startedAt) / 1000))
       });
       if (error) throw error;
       draftFinalized = true;

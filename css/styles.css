@@ -1,10 +1,18 @@
 /* ── Theme tokens ─────────────────────────────────────────────────────────── */
+/* Default theme is now "Mono Neon" — near-black bg, near-white accent, to
+   match the Improvement rebrand's black & white neon mark. --on-primary is
+   the foreground colour for anything painted ON TOP of --primary (buttons,
+   the FAB, the segmented indicator, own chat bubbles, rest-timer presets) —
+   a near-white primary needs dark text there, not white-on-white. Every
+   purchasable theme (js/gamedata.js) sets its own onPrimary — the coloured
+   ones stay '#fff' so they're unaffected by this default swapping to mono. */
 :root{
-  --bg:#0b0b12; --bg2:#11111b;
+  --bg:#08080c; --bg2:#101016;
   --card:#171722; --card2:#1e1e2b;
   --border:rgba(255,255,255,.09); --border-soft:rgba(255,255,255,.05);
   --text:#f3f3fa; --muted:#9a9ab4; --muted-dim:#6a6a84;
-  --primary:#6d5efc; --primary-soft:#9b8dff; --primary-rgb:109,94,252; --accent2-rgb:63,182,240;
+  --primary:#f2f2f7; --primary-soft:#ffffff; --primary-rgb:242,242,247; --accent2-rgb:201,201,214;
+  --on-primary:#08080c;
   --green:#22d99a; --amber:#ffb341; --red:#ff5470; --blue:#3fb6f0;
   --radius:16px; --radius-sm:11px;
   --shadow:0 16px 40px -18px rgba(0,0,0,.7);
@@ -45,7 +53,7 @@ input,select,textarea{font-family:inherit}
   transition:transform .06s ease, filter .15s ease;
 }
 .btn:active{transform:scale(.97)}
-.btn-primary{background:linear-gradient(180deg,var(--primary-soft),var(--primary)); border-color:transparent; color:#fff}
+.btn-primary{background:linear-gradient(180deg,var(--primary-soft),var(--primary)); border-color:transparent; color:var(--on-primary)}
 .btn-primary:hover{filter:brightness(1.06)}
 .btn-ghost{background:transparent}
 .btn-danger{color:var(--red); border-color:rgba(255,84,112,.35); background:rgba(255,84,112,.08)}
@@ -135,9 +143,9 @@ textarea{resize:vertical; min-height:70px}
 .ex-thumb-svg{width:100%; height:100%; display:block}
 
 .fab{position:fixed; right:18px; bottom:calc(18px + var(--safe-b)); z-index:25;
-  width:56px; height:56px; border-radius:50%; border:none; font-size:28px; color:#fff;
+  width:56px; height:56px; border-radius:50%; border:none; font-size:28px; color:var(--on-primary);
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
-  box-shadow:0 10px 24px -6px rgba(109,94,252,.7); display:grid; place-items:center}
+  box-shadow:0 10px 24px -6px rgba(var(--primary-rgb),.7); display:grid; place-items:center}
 .fab:active{transform:scale(.94)}
 .fab-secondary{right:86px; width:48px; height:48px; font-size:20px;
   background:var(--card2); color:var(--text); box-shadow:var(--shadow); border:1px solid var(--border)}
@@ -206,7 +214,7 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
 .rt-picker-time{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; min-width:64px; text-align:center}
 .rt-picker .btn{width:36px; height:36px; padding:0; font-size:16px}
 .rt-preset-row{display:flex; gap:8px; justify-content:center; margin-bottom:14px}
-.rt-preset-row .btn.active{background:var(--primary); color:#fff; border-color:var(--primary)}
+.rt-preset-row .btn.active{background:var(--primary); color:var(--on-primary); border-color:var(--primary)}
 
 @media (prefers-reduced-motion: reduce){
   .rt-urgent{animation:none}
@@ -318,7 +326,7 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
   font-weight:700; font-size:12px; padding:8px 4px; border-radius:9px; transition:color .15s, transform .1s ease;
   overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
 .segment:active{transform:scale(.94)}
-.segment.active{color:#fff}
+.segment.active{color:var(--on-primary)}
 
 /* ── Net-position headline ───────────────────────────────────────────────── */
 .net-card{padding:18px; margin-bottom:16px}
@@ -442,7 +450,7 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
 .chat-bubble-row.mine{justify-content:flex-end}
 .chat-bubble{max-width:78%; padding:9px 13px; border-radius:16px; background:var(--bg2);
   font-size:14px; line-height:1.4; word-break:break-word}
-.chat-bubble-row.mine .chat-bubble{background:var(--primary); color:#fff; border-bottom-right-radius:4px}
+.chat-bubble-row.mine .chat-bubble{background:var(--primary); color:var(--on-primary); border-bottom-right-radius:4px}
 .chat-bubble-row:not(.mine) .chat-bubble{border-bottom-left-radius:4px}
 .chat-attachment{max-width:78%}
 .chat-photo{max-width:78%; border-radius:14px; display:block}
@@ -551,18 +559,35 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
 .fab{animation:fabPop .4s cubic-bezier(.34,1.56,.64,1)}
 @keyframes fabPop{from{transform:scale(0) rotate(-30deg); opacity:0}to{transform:scale(1) rotate(0); opacity:1}}
 
-/* ── App-open splash ───────────────────────────────────────────────────────── */
+/* ── App-open splash: chevrons build in one at a time, then the wordmark ──── */
 #splash{position:fixed; inset:0; z-index:200; background:var(--bg);
-  display:flex; align-items:center; justify-content:center; overflow:hidden;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden;
   transition:opacity .4s ease, visibility .4s ease}
 #splash.hide{opacity:0; visibility:hidden; pointer-events:none}
 #splash::before{content:''; position:absolute; width:140vmax; height:140vmax; border-radius:50%;
-  background:radial-gradient(circle, rgba(109,94,252,.28), transparent 60%);
+  background:radial-gradient(circle, rgba(var(--primary-rgb),.28), transparent 60%);
   animation:splashSweep 1.4s cubic-bezier(.16,1,.3,1) forwards}
 @keyframes splashSweep{from{transform:scale(.25); opacity:0}to{transform:scale(1); opacity:1}}
-.splash-logo{position:relative; z-index:1; animation:splashPop .7s cubic-bezier(.34,1.56,.64,1)}
-@keyframes splashPop{0%{transform:scale(.4) rotate(-10deg); opacity:0}
-  60%{transform:scale(1.1) rotate(3deg); opacity:1}100%{transform:scale(1) rotate(0)}}
+.splash-logo{position:relative; z-index:1}
+.splash-mark{display:block}
+/* Each chevron rises + fades in on its own delay, bottom first — the same
+   order the mark's own glow gradient reads (dimmest at the bottom, brightest
+   at the top), so the build mirrors the mark's design instead of fighting it. */
+.splash-chevron{opacity:0; transform:translateY(18px); transform-box:fill-box; transform-origin:center;
+  animation:splashChevronIn .5s cubic-bezier(.22,1,.36,1) forwards}
+.splash-chevron-1{animation-delay:.05s}
+.splash-chevron-2{animation-delay:.2s}
+.splash-chevron-3{animation-delay:.35s}
+@keyframes splashChevronIn{from{opacity:0; transform:translateY(18px)}to{opacity:1; transform:translateY(0)}}
+.splash-wordmark{position:relative; z-index:1; margin-top:20px; font-size:20px; font-weight:800;
+  color:#fff; text-align:center; opacity:0; letter-spacing:.6em;
+  animation:splashWordmarkIn .7s cubic-bezier(.22,1,.36,1) forwards; animation-delay:.6s}
+@keyframes splashWordmarkIn{from{opacity:0; letter-spacing:.6em}to{opacity:1; letter-spacing:.35em}}
+@media (prefers-reduced-motion: reduce){
+  #splash::before{animation:none; opacity:1; transform:scale(1)}
+  .splash-chevron{animation:none; opacity:1; transform:none}
+  .splash-wordmark{animation:none; opacity:1; letter-spacing:.35em}
+}
 
 /* ── Drifting aurora background (transform/opacity only) ──────────────────── */
 body::before,body::after{content:''; position:fixed; z-index:-1; pointer-events:none; border-radius:50%;

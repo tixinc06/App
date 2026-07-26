@@ -1,9 +1,9 @@
-// Service worker — caches the app shell so the tracker opens instantly and works
+// Service worker — caches the app shell so Improvement opens instantly and works
 // offline once installed to the home screen.
 // Strategy: network-first for ALL same-origin requests (so code edits/deploys
 // always land when online), falling back to the cache only when offline. This
 // avoids stale-JavaScript bugs after a deploy.
-const CACHE = 'tracker-v24';
+const CACHE = 'improvement-v25';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './css/styles.css',
@@ -75,7 +75,7 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let payload = {};
   try { payload = e.data ? e.data.json() : {}; } catch { /* non-JSON payload — use defaults */ }
-  const title = payload.title || 'Tracker';
+  const title = payload.title || 'Improvement';
   const body = payload.body || '';
   const url = payload.url || './';
   e.waitUntil(

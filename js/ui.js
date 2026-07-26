@@ -108,15 +108,22 @@ export function formModal({ title, fields, submitText = 'Save', onSubmit }) {
     } else if (f.type === 'select') {
       input = el('select');
       for (const o of f.options) input.append(el('option', { value: o.value }, o.label));
+    } else if (f.type === 'checkbox') {
+      input = el('input', { type: 'checkbox' });
+      input.checked = !!f.value;
     } else {
       input = el('input', {
         type: f.type || 'text', placeholder: f.placeholder || '',
         step: f.step, min: f.min, max: f.max, required: f.required, inputmode: f.type === 'number' ? 'decimal' : null
       });
     }
-    if (f.value != null) input.value = f.value;
+    if (f.type !== 'checkbox' && f.value != null) input.value = f.value;
     inputs[f.name] = input;
-    form.append(el('label', {}, [f.label, input, f.help ? el('small', { class: 'dim' }, f.help) : null]));
+    if (f.type === 'checkbox') {
+      form.append(el('label', { style: 'display:flex;align-items:center;gap:8px;flex-direction:row' }, [input, f.label]));
+    } else {
+      form.append(el('label', {}, [f.label, input, f.help ? el('small', { class: 'dim' }, f.help) : null]));
+    }
   }
   const err = el('p', { class: 'form-error', hidden: true });
   const btn = el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, submitText);
@@ -128,6 +135,7 @@ export function formModal({ title, fields, submitText = 'Save', onSubmit }) {
     for (const f of fields) {
       const input = inputs[f.name];
       if (f.type === 'file') values[f.name] = input.files[0] || null;
+      else if (f.type === 'checkbox') values[f.name] = !!input.checked;
       else if (f.type === 'number') values[f.name] = input.value === '' ? null : Number(input.value);
       else values[f.name] = input.value.trim ? input.value.trim() : input.value;
     }
@@ -241,7 +249,7 @@ export function countUp(node, target, formatFn = String, duration = 650) {
 // A short confetti burst to celebrate a win (e.g. logging a sale).
 export function celebrate() {
   if (prefersReducedMotion()) return;
-  const colors = ['#6d5efc', '#9b8dff', '#22d99a', '#ffb341', '#3fb6f0', '#ff5470'];
+  const colors = ['#ffffff', '#c9c9d6', '#22d99a', '#ffb341', '#3fb6f0', '#ff5470'];
   const pieces = [];
   for (let i = 0; i < 26; i++) {
     const dx = (Math.random() - 0.5) * 340;

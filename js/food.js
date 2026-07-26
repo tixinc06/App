@@ -28,12 +28,14 @@ async function loadData(date) {
   const waterGoalMl = settings.error ? DEFAULT_WATER_GOAL_ML : Number(settings.data?.water_goal_ml) || DEFAULT_WATER_GOAL_ML;
   const waterMl = water.error ? 0 : Number(water.data?.amount_ml) || 0;
 
-  // Rank foods by most-recent-use (recency of appearance in food_logs); foods
-  // never logged sort alphabetically after every used food — makes the common
-  // case (log the same handful of things most days) a near-top-of-list tap.
+  // Rank foods: favourites first, then by most-recent-use (recency of
+  // appearance in food_logs); foods never logged sort alphabetically after
+  // every used food — makes the common case (log the same handful of things
+  // most days) a near-top-of-list tap.
   const recencyRank = new Map();
   (recentLogs.data || []).forEach((r, i) => { if (r.food_id && !recencyRank.has(r.food_id)) recencyRank.set(r.food_id, i); });
   const orderedFoods = [...(foods.data || [])].sort((a, b) => {
+    if (!!a.favourite !== !!b.favourite) return a.favourite ? -1 : 1;
     const ra = recencyRank.has(a.id) ? recencyRank.get(a.id) : Infinity;
     const rb = recencyRank.has(b.id) ? recencyRank.get(b.id) : Infinity;
     return ra !== rb ? ra - rb : a.name.localeCompare(b.name);
@@ -83,6 +85,17 @@ export async function renderFood(root) {
       onClick: () => { selectedDate = shiftDate(selectedDate, 1); renderFood(root); }
     }, '›')
   ]));
+
+  // Favourites — one-tap quick log, hidden entirely when nothing is starred.
+  const favourites = foods.filter(f => f.favourite);
+  if (favourites.length) {
+    root.append(el('div', { class: 'section-head' }, [el('h2', {}, 'Favourites')]));
+    root.append(el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px' },
+      favourites.map(f => el('button', {
+        type: 'button', class: 'btn btn-sm btn-ghost',
+        onClick: () => logFoodQuick(f, root)
+      }, `⭐ ${f.name}`))));
+  }
 
   // Totals
   const t = logs.reduce((a, l) => ({
@@ -170,8 +183,9 @@ async function scanAndHandle(root) {
     // silently save the wrong product's nutrition. Show what was matched
     // before it goes anywhere near the food form, so a wrong match gets
     // caught here instead of turning into a bad log entry.
-    const confirmed = await confirmScannedProduct(hit);
-    if (confirmed) addFoodForm(root, () => renderFood(root), hit);
+    const choice = await confirmScannedProduct(hit);
+    if (choice === 'favourite') addFoodForm(root, () => renderFood(root), { ...hit, favourite: true });
+    else if (choice === 'confirm') addFoodForm(root, () => renderFood(root), hit);
     else addFoodForm(root, () => renderFood(root), { barcode });
   } else {
     toast('Not found on Open Food Facts — add it manually', '');
@@ -180,10 +194,11 @@ async function scanAndHandle(root) {
 }
 
 // Shows the matched product (name + per-100g/serving macros) before it goes
-// anywhere near the food form. Resolves true if the user confirms it's the
-// right item, false if they say it's wrong (falls back to manual entry with
-// the barcode kept, same as a lookup miss) — catches a bad scan or a
-// stale/wrong Open Food Facts entry before it becomes a saved log entry.
+// anywhere near the food form. Resolves 'confirm' if the user confirms it's
+// the right item, 'favourite' if they also want it starred, or 'manual' if
+// they say it's wrong (falls back to manual entry with the barcode kept,
+// same as a lookup miss) — catches a bad scan or a stale/wrong Open Food
+// Facts entry before it becomes a saved log entry.
 function confirmScannedProduct(hit) {
   return new Promise(resolve => {
     let settled = false;
@@ -195,13 +210,14 @@ function confirmScannedProduct(hit) {
         el('div', { class: 'dim', style: 'font-size:13px' },
           `${num(hit.calories)} cal · P ${num(hit.protein)} · C ${num(hit.carbs)} · F ${num(hit.fat)}g — per ${hit.serving_desc}`)
       ]),
-      el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:8px', onClick: () => { closeModal(); settle(true); } }, '✓ Yes, that\'s it'),
-      el('button', { class: 'btn btn-ghost btn-block', onClick: () => { closeModal(); settle(false); } }, '✕ Not this — enter manually')
+      el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:8px', onClick: () => { closeModal(); settle('confirm'); } }, '✓ Yes, that\'s it'),
+      el('button', { class: 'btn btn-ghost btn-block', style: 'margin-bottom:8px', onClick: () => { closeModal(); settle('favourite'); } }, '⭐ Yes — and save as favourite'),
+      el('button', { class: 'btn btn-ghost btn-block', onClick: () => { closeModal(); settle('manual'); } }, '✕ Not this — enter manually')
     ]));
-    // Closing via ✕/backdrop without picking either button — treat as "not
-    // this" rather than silently accepting an unconfirmed match.
+    // Closing via ✕/backdrop without picking a button — treat as "not this"
+    // rather than silently accepting an unconfirmed match.
     const host = document.getElementById('modal-host');
-    const observer = new MutationObserver(() => { if (host.hidden) { observer.disconnect(); settle(false); } });
+    const observer = new MutationObserver(() => { if (host.hidden) { observer.disconnect(); settle('manual'); } });
     observer.observe(host, { attributes: true, attributeFilter: ['hidden'] });
   });
 }
@@ -458,6 +474,7 @@ function logRow(l, root) {
 
 function logActions(l, root) {
   actionSheet(l.food_name || 'Entry', [
+    { label: '✏️ Edit servings', onClick: () => editLogServingsForm(l, root) },
     { label: '🗑️ Remove', danger: true, onClick: () => {
       confirmModal({
         title: 'Remove entry?', confirmText: 'Remove',
@@ -469,6 +486,43 @@ function logActions(l, root) {
       });
     } }
   ]);
+}
+
+// Rescales the stored macro snapshot proportionally from the entry's own
+// original per-serving values (l.calories/l.servings etc — NOT re-reading
+// the current library food, which may have since changed) so a corrected
+// entry stays internally consistent with how it was first logged.
+function editLogServingsForm(l, root) {
+  const prevServings = Number(l.servings) || 1;
+  formModal({
+    title: 'Edit servings',
+    fields: [{ name: 'servings', label: 'Servings', type: 'number', step: '0.25', min: '0', value: l.servings, required: true }],
+    submitText: 'Save',
+    onSubmit: async v => {
+      const newServings = Number(v.servings) || 0;
+      const ratio = newServings / prevServings;
+      const { error } = await sb.from('food_logs').update({
+        servings: newServings,
+        calories: l.calories * ratio, protein: l.protein * ratio,
+        carbs: l.carbs * ratio, fat: l.fat * ratio
+      }).eq('id', l.id);
+      if (error) throw error;
+      toast('Updated', 'ok');
+      renderFood(root);
+    }
+  });
+}
+
+// One-tap log of a single serving, used by the Favourites strip.
+async function logFoodQuick(food, root) {
+  const { error } = await sb.from('food_logs').insert({
+    user_id: getUid(), food_id: food.id, food_name: food.name,
+    log_date: selectedDate, servings: 1,
+    calories: food.calories, protein: food.protein, carbs: food.carbs, fat: food.fat
+  });
+  if (error) { toast(error.message, 'err'); return; }
+  toast(`${food.name} logged`, 'ok');
+  renderFood(root);
 }
 
 // ── Log a food for the selected day ──
@@ -517,6 +571,12 @@ async function manageFoods(root) {
 
 function foodActions(f, root) {
   actionSheet(f.name, [
+    { label: f.favourite ? '★ Remove from favourites' : '⭐ Add to favourites', onClick: async () => {
+      const { error } = await sb.from('foods').update({ favourite: !f.favourite }).eq('id', f.id);
+      if (error) { toast(error.message, 'err'); return; }
+      toast(f.favourite ? 'Removed from favourites' : 'Added to favourites', 'ok');
+      renderFood(root);
+    } },
     { label: '✏️ Edit', onClick: () => editFoodForm(f, root) },
     { label: '🗑️ Delete', danger: true, onClick: () => {
       confirmModal({
@@ -540,7 +600,8 @@ const foodFields = (v = {}) => ([
   { name: 'calories', label: 'Calories (per serving)', type: 'number', step: '1', min: '0', required: true, value: v.calories },
   { name: 'protein', label: 'Protein (g)', type: 'number', step: '0.1', min: '0', value: v.protein ?? 0 },
   { name: 'carbs', label: 'Carbs (g)', type: 'number', step: '0.1', min: '0', value: v.carbs ?? 0 },
-  { name: 'fat', label: 'Fat (g)', type: 'number', step: '0.1', min: '0', value: v.fat ?? 0 }
+  { name: 'fat', label: 'Fat (g)', type: 'number', step: '0.1', min: '0', value: v.fat ?? 0 },
+  { name: 'favourite', label: '⭐ Favourite', type: 'checkbox', value: !!v.favourite }
 ]);
 
 function addFoodForm(root, after, prefill = {}) {
