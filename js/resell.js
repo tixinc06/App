@@ -11,6 +11,7 @@ import { lineChart, barChart, chartCard } from './charts.js';
 import { plCalendar } from './calendar.js';
 import { renderProducts } from './products.js';
 import { renderGoals, loadTopBarGoal } from './resellgoals.js';
+import { renderReceipts } from './receipts.js';
 
 const BUCKET = 'resell-photos';
 const STALE_DAYS = 60;
@@ -22,15 +23,25 @@ let calYear = null, calMonth = null; // calendar's currently-viewed month
 let invSearch = '', invSort = 'newest', invStatus = 'all'; // inventory search/sort state
 
 async function loadData() {
-  const [items, sales, expenses] = await Promise.all([
+  const [items, sales, expenses, receiptedItemIds] = await Promise.all([
     sb.from('resell_items').select('*').order('created_at', { ascending: false }),
     sb.from('resell_sales').select('*').order('sold_date', { ascending: false }),
-    sb.from('resell_expenses').select('*').order('expense_date', { ascending: false })
+    sb.from('resell_expenses').select('*').order('expense_date', { ascending: false }),
+    // Best-effort: the Receipts feature is optional/newer, so a not-yet-run
+    // migration must not take the whole Reselling section down with it.
+    // Supabase resolves with { error } rather than rejecting on a Postgrest
+    // error (e.g. missing table), so this must check r.error, not try/catch.
+    sb.from('receipts').select('item_id')
+      .then(r => r.error ? [] : (r.data || []).map(x => x.item_id).filter(Boolean))
+      .catch(() => [])
   ]);
   if (items.error) throw items.error;
   if (sales.error) throw sales.error;
   if (expenses.error) throw expenses.error;
-  return { items: items.data || [], sales: sales.data || [], expenses: expenses.data || [] };
+  return {
+    items: items.data || [], sales: sales.data || [], expenses: expenses.data || [],
+    receiptedItemIds: new Set(receiptedItemIds)
+  };
 }
 
 // Load a private-bucket thumbnail into an <img> without blocking the list render.
@@ -93,7 +104,8 @@ export async function renderResell(root) {
     { value: 'inventory', label: 'Inventory' },
     { value: 'products', label: 'Products' },
     { value: 'insights', label: 'Insights' },
-    { value: 'goals', label: 'Goals' }
+    { value: 'goals', label: 'Goals' },
+    { value: 'receipts', label: 'Receipts' }
   ], segment, v => { segment = v; renderResell(root); }));
 
   const body = el('div');
@@ -106,6 +118,11 @@ export async function renderResell(root) {
 
   if (segment === 'goals') {
     renderGoals(body, root);
+    return;
+  }
+
+  if (segment === 'receipts') {
+    renderReceipts(body, root);
     return;
   }
 
@@ -305,7 +322,7 @@ function saleDetailRow(s, root) {
 
 // ── Inventory segment ────────────────────────────────────────────────────────
 function renderInventory(body, data, root) {
-  const { items, sales } = data;
+  const { items, sales, receiptedItemIds } = data;
   const activeSales = sales.filter(s => !s.returned);
   const inventoryAll = items.filter(i => i.status !== 'sold');
   const totalValue = inventoryAll.reduce((a, i) => a + (Number(i.cost) || 0) * (Number(i.quantity) || 1), 0);
@@ -363,7 +380,7 @@ function renderInventory(body, data, root) {
     if (!filtered.length) {
       listWrap.append(emptyState('📦', inventoryAll.length ? 'No items match your search.' : 'No items yet. Tap + to add your first one.'));
     } else {
-      const filteredList = el('div', { class: 'list' }, filtered.map(i => itemRow(i, root)));
+      const filteredList = el('div', { class: 'list' }, filtered.map(i => itemRow(i, root, receiptedItemIds)));
       if (animate) staggerChildren(filteredList);
       listWrap.append(filteredList);
     }
@@ -495,7 +512,7 @@ function stat(k, v, cls = '', animate) {
   ]);
 }
 
-function itemRow(item, root) {
+function itemRow(item, root, receiptedItemIds) {
   let thumb;
   if (item.photo_url) {
     if (/^(https?:\/\/|products\/)/i.test(item.photo_url)) {
@@ -523,7 +540,8 @@ function itemRow(item, root) {
       el('div', { class: 'title' }, [
         item.name,
         qty > 1 ? el('span', { class: 'dim' }, ` ×${qty}`) : null,
-        stale ? el('span', { class: 'badge-stale' }, 'Stale') : null
+        stale ? el('span', { class: 'badge-stale' }, 'Stale') : null,
+        receiptedItemIds?.has(item.id) ? el('span', { title: 'Has a linked receipt' }, ' 🧾') : null
       ]),
       el('div', { class: 'sub' }, subParts.join(' · ') || '—'),
       item.product_url ? el('a', {

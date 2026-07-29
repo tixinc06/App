@@ -3,6 +3,7 @@
 // helpers (copy yesterday, recents-first food picker).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
+import { queuedInsert } from './offlinequeue.js';
 import {
   el, num, fmtDate, todayISO, shiftDate, toast, formModal, confirmModal, actionSheet, emptyState,
   skeleton, staggerChildren, countUp, openModal, closeModal
@@ -364,13 +365,15 @@ function recipeActions(rc, foods, root) {
 }
 
 async function logRecipe(rc, root) {
-  const { error } = await sb.from('food_logs').insert({
-    user_id: getUid(), food_id: null, food_name: rc.name,
-    log_date: selectedDate, servings: 1,
-    calories: rc.calories, protein: rc.protein, carbs: rc.carbs, fat: rc.fat
-  });
-  if (error) { toast(error.message, 'err'); return; }
-  toast(`${rc.name} logged`, 'ok');
+  let queued;
+  try {
+    ({ queued } = await queuedInsert('food_logs', {
+      user_id: getUid(), food_id: null, food_name: rc.name,
+      log_date: selectedDate, servings: 1,
+      calories: rc.calories, protein: rc.protein, carbs: rc.carbs, fat: rc.fat
+    }));
+  } catch (error) { toast(error.message, 'err'); return; }
+  toast(queued ? `${rc.name} saved offline — will sync` : `${rc.name} logged`, 'ok');
   renderFood(root);
 }
 
@@ -515,13 +518,15 @@ function editLogServingsForm(l, root) {
 
 // One-tap log of a single serving, used by the Favourites strip.
 async function logFoodQuick(food, root) {
-  const { error } = await sb.from('food_logs').insert({
-    user_id: getUid(), food_id: food.id, food_name: food.name,
-    log_date: selectedDate, servings: 1,
-    calories: food.calories, protein: food.protein, carbs: food.carbs, fat: food.fat
-  });
-  if (error) { toast(error.message, 'err'); return; }
-  toast(`${food.name} logged`, 'ok');
+  let queued;
+  try {
+    ({ queued } = await queuedInsert('food_logs', {
+      user_id: getUid(), food_id: food.id, food_name: food.name,
+      log_date: selectedDate, servings: 1,
+      calories: food.calories, protein: food.protein, carbs: food.carbs, fat: food.fat
+    }));
+  } catch (error) { toast(error.message, 'err'); return; }
+  toast(queued ? `${food.name} saved offline — will sync` : `${food.name} logged`, 'ok');
   renderFood(root);
 }
 
@@ -545,14 +550,13 @@ function logFoodForm(foods, root) {
       const food = foods.find(f => f.id === v.food_id);
       if (!food) throw new Error('Pick a food.');
       const s = Number(v.servings) || 1;
-      const { error } = await sb.from('food_logs').insert({
+      const { queued } = await queuedInsert('food_logs', {
         user_id: getUid(), food_id: food.id, food_name: food.name,
         log_date: selectedDate, servings: s,
         calories: food.calories * s, protein: food.protein * s,
         carbs: food.carbs * s, fat: food.fat * s
       });
-      if (error) throw error;
-      toast('Logged', 'ok');
+      toast(queued ? 'Saved offline — will sync' : 'Logged', 'ok');
       renderFood(root);
     }
   });

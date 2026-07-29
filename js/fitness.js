@@ -21,13 +21,114 @@ import { renderFriends } from './social.js';
 import { detectAndSavePRs, checkGoals, award, loadProgress, isOnCooldown, estimatedE1RM } from './progression.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, checkAchievements } from './achievements.js';
-import { attachExercisePicker, loadPreviousPerformance } from './exercises.js';
+import { attachExercisePicker, loadPreviousPerformance, muscleGroupOf } from './exercises.js';
 import { startRestTimer, stopRestTimer, durationPickerEl, loadLastDuration } from './resttimer.js';
 import { plateCalculatorModal } from './platecalc.js';
 import { playSound } from './sound.js';
 import { weightUnit, kgToDisplay, displayToKg, fmtWeight, weightStep } from './units.js';
 import { exerciseThumb } from './exercisemedia.js';
 import { requestWakeLock, releaseWakeLock } from './wakelock.js';
+import { queuedInsert, registerFlushHandler } from './offlinequeue.js';
+
+// The PR/goal/XP/achievement/rank-up pipeline that runs after a workout is
+// actually in the database. Extracted out of the save handler so it can also
+// run from the offline queue's flush handler below — a workout saved with no
+// signal only banks its XP/PRs once it syncs, not at save time (the pipeline
+// needs the database for the cooldown check, PR lookups, etc). Never throws:
+// every stage is independently best-effort, matching the original inline
+// behaviour, since a progression failure must never hide that the workout
+// itself saved successfully.
+async function runPostWorkoutPipeline(exercises) {
+  // The whole progression pipeline (PR/goal detection, achievement unlocks,
+  // XP/Plate award) is skipped entirely while on cooldown — not just the
+  // award() call. Detecting a PR or completing a goal would otherwise mark
+  // it permanently (personal_records upsert, fitness_goals.achieved,
+  // achievements table) with no XP ever paid out for it, since award()
+  // refuses to grant XP during cooldown. Skipping everything defers
+  // detection cleanly to the next non-cooldown save — zero data loss, no
+  // burned rewards.
+  let gains = null, cooldownUntil = null, prEvents = [];
+  try {
+    cooldownUntil = await isOnCooldown();
+    if (!cooldownUntil) {
+      const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
+      prEvents = await detectAndSavePRs(exercises);
+      const goalEvents = await checkGoals();
+      gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
+    }
+  } catch { /* progression failure shouldn't hide that the workout saved */ }
+
+  if (cooldownUntil) {
+    const mins = Math.max(1, Math.round((cooldownUntil - new Date()) / 60000));
+    toast(`Workout saved 💪 · On cooldown — ${Math.floor(mins / 60)}h ${mins % 60}m left`, 'ok');
+  } else if (gains) {
+    const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
+    if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
+    if (gains.eventApplied) bits.push('⚡ Double weekend!');
+    if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
+    toast(bits.join(' · '), 'ok');
+    if (gains.levelsGained > 0) { celebrate(); playSound('level_up'); }
+    else if (prEvents.length) playSound('pr');
+  } else {
+    toast('Workout saved 💪', 'ok');
+  }
+
+  // Achievement check is separate + best-effort, and also fully skipped
+  // during cooldown (see above) — it must never block the workout save.
+  if (!cooldownUntil) {
+    try {
+      const prog = gains?.progress || await loadProgress();
+      const { data: wRows } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
+      const streak = await computeStreak(wRows || []);
+      const stats = await loadStats(prog, streak.current);
+      const achEvents = await checkAchievements(stats);
+      if (achEvents.length) {
+        const achGains = await award(achEvents);
+        for (const a of achEvents) toast(`🏆 ${a.label} unlocked! +${a.xp} XP · +${a.plates} Plates`, 'ok');
+        celebrate();
+        if (achGains?.levelsGained > 0) toast(achGains.levelsGained > 1 ? `Level up ×${achGains.levelsGained}!` : 'Level up!', 'ok');
+      }
+    } catch { /* best-effort — achievements can catch up on the next save */ }
+  }
+
+  // Rank-up celebration — also best-effort + skipped on cooldown (a rank
+  // change is a byproduct of the PRs just detected above, so if those were
+  // skipped there's nothing new to detect anyway). Compares the freshly
+  // computed overall rank's globalIndex (0-30) against the last globalIndex
+  // stored in fitness_progress.rank_label — "Godly" is stored as the literal
+  // string once achieved (globalIndex alone can't tell Godly apart from a
+  // maxed Grand Champion 3, since Godly doesn't raise the index further).
+  if (!cooldownUntil) {
+    try {
+      const overall = await loadOverallRank();
+      if (overall) {
+        const prog = await loadProgress();
+        const prevStored = prog.rank_label;
+        const prevIsGodly = prevStored === 'Godly';
+        const prevIndex = prevIsGodly ? 30 : (prevStored != null ? Number(prevStored) : -1);
+        const newIsGodly = !!overall.isGodly;
+        const increased = newIsGodly && !prevIsGodly ? true : (!newIsGodly && overall.globalIndex > prevIndex);
+        const toStore = newIsGodly ? 'Godly' : String(overall.globalIndex);
+        if (increased) {
+          celebrate();
+          playSound('rank_up');
+          toast(`🏅 You reached ${overall.label}!`, 'ok');
+        }
+        if (toStore !== prevStored) {
+          await sb.from('fitness_progress').update({ rank_label: toStore }).eq('user_id', getUid());
+        }
+      }
+    } catch { /* best-effort — rank-up detection can catch up on the next save */ }
+  }
+}
+
+// Runs the pipeline for a workout once it lands via the offline queue —
+// registered once at module load. The user may be on a completely different
+// screen by the time this fires, so it only toasts/celebrates; it never
+// tries to re-render a specific view.
+registerFlushHandler('workouts', async (payload) => {
+  await runPostWorkoutPipeline(payload.exercises || []);
+});
 
 // Best set by estimated 1RM (Epley) — same convention used for PR detection
 // in js/progression.js. Used to anchor the progressive-overload hint. Warm-up
@@ -103,8 +204,12 @@ async function loadData() {
   return { workouts: workouts.data || [], weights: weights.data || [] };
 }
 
-// Count workouts per week (Monday-based) for the last `weeks` weeks, oldest→newest.
-function weeklyCounts(workouts, weeks) {
+// Bucket workouts into Monday-based weeks for the last `weeks` weeks,
+// oldest→newest, summing `valueOf(workout)` into each bucket. Defaults to
+// counting workouts (the original behaviour); pass a per-workout value
+// function (e.g. total tonnage) to reuse the same bucketing for other
+// weekly-aggregate charts instead of re-deriving it.
+function weeklyCounts(workouts, weeks, valueOf = () => 1) {
   const d0 = new Date(todayISO() + 'T00:00:00');
   const dow = (d0.getDay() + 6) % 7; // 0 = Monday
   const monday = new Date(d0); monday.setDate(d0.getDate() - dow);
@@ -117,10 +222,38 @@ function weeklyCounts(workouts, weeks) {
   for (const w of workouts) {
     if (!w.workout_date) continue;
     for (let j = buckets.length - 1; j >= 0; j--) {
-      if (w.workout_date >= buckets[j].start) { buckets[j].value++; break; }
+      if (w.workout_date >= buckets[j].start) { buckets[j].value += valueOf(w); break; }
     }
   }
   return buckets;
+}
+
+// Σ weight×reps over non-warmup sets in a workout, in kg (converted to the
+// display unit by the caller). Bodyweight movements logged at weight 0
+// contribute nothing — tonnage is a barbell-progress signal, not a
+// total-effort one, and the UI copy says so.
+function tonnageOf(workout) {
+  const exs = Array.isArray(workout.exercises) ? workout.exercises : [];
+  return exs.reduce((a, e) => a + (e.sets || []).reduce((b, s) =>
+    s.warmup ? b : b + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0), 0);
+}
+
+// Working (non-warmup) sets per muscle group over the last `weeks` weeks.
+function muscleGroupCounts(workouts, weeks) {
+  const cutoff = isoOf(new Date(Date.now() - weeks * 7 * 86400000));
+  const counts = {};
+  for (const w of workouts) {
+    if (!w.workout_date || w.workout_date < cutoff) continue;
+    const exs = Array.isArray(w.exercises) ? w.exercises : [];
+    for (const e of exs) {
+      const group = muscleGroupOf(e.name);
+      const working = (e.sets || []).filter(s => !s.warmup).length;
+      if (working) counts[group] = (counts[group] || 0) + working;
+    }
+  }
+  return Object.entries(counts)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
 }
 
 // Existing workout log + bodyweight tracking, now rendered INTO `container`
@@ -207,9 +340,21 @@ async function renderTrainingLog(container, root) {
     container.append(workoutList);
 
     const bars = weeklyCounts(workouts, 8);
+    const tonnageBars = weeklyCounts(workouts, 8, w => kgToDisplay(tonnageOf(w)));
+    const groupBars = muscleGroupCounts(workouts, 4);
     if (bars.some(b => b.value > 0)) {
       container.append(el('div', { class: 'section-head', style: 'margin-top:20px' }, [el('h2', {}, 'Insights')]));
       container.append(chartCard('Workouts · per week', barChart(bars, { color: 'var(--upper, var(--primary-soft))', fmt: v => String(v) })));
+      if (tonnageBars.some(b => b.value > 0)) {
+        container.append(chartCard(`Volume · per week (${weightUnit()})`,
+          barChart(tonnageBars, { color: 'var(--green)', fmt: v => num(v) })));
+        container.append(el('p', { class: 'dim', style: 'font-size:12px;margin:-10px 2px 18px' },
+          'Sum of weight × reps, warm-ups excluded. Bodyweight moves logged at 0 don\'t add to this — it tracks barbell progress, not total effort.'));
+      }
+      if (groupBars.length) {
+        container.append(chartCard('Muscle groups · last 4 weeks (working sets)',
+          barChart(groupBars, { color: 'var(--amber)', fmt: v => String(v) })));
+      }
     }
   }
 
@@ -278,11 +423,53 @@ export function viewWorkout(w, root) {
     el('div', { class: 'modal-actions', style: 'margin-top:18px' }, [
       el('button', { class: 'btn btn-ghost', onClick: closeModal }, 'Close'),
       el('button', {
+        class: 'btn btn-primary',
+        onClick: () => { closeModal(); saveAsRoutine(w, root); }
+      }, '📋 Save as routine'),
+      el('button', {
         class: 'btn btn-danger',
         onClick: () => { closeModal(); deleteWorkout(w, root); }
       }, 'Delete')
     ])
   ]));
+}
+
+// Turns a completed workout into a reusable workout_templates row. Shape
+// conversion: workouts.exercises is [{name, sets:[{weight,reps,warmup}]}],
+// but workout_templates.exercises is [{name, sets:<count>, reps:<number>}]
+// (js/workouts.js:233) — sets becomes the count of non-warmup sets, reps
+// becomes the most common rep count among them (falling back to the first).
+// Only one modal can exist at a time (#modal-host) — this is always called
+// AFTER the caller has already closed the detail modal, same pattern the
+// Delete button beside it uses, rather than stacking a second one open.
+function saveAsRoutine(w, root) {
+  const exs = Array.isArray(w.exercises) ? w.exercises : [];
+  const templateExercises = exs
+    .map(e => {
+      const workingSets = (e.sets || []).filter(s => !s.warmup);
+      if (!workingSets.length) return null;
+      const repCounts = {};
+      for (const s of workingSets) repCounts[s.reps] = (repCounts[s.reps] || 0) + 1;
+      const reps = Number(Object.keys(repCounts).sort((a, b) => repCounts[b] - repCounts[a])[0]) || workingSets[0].reps || 1;
+      return { name: e.name, sets: workingSets.length, reps };
+    })
+    .filter(Boolean);
+
+  if (!templateExercises.length) { toast('No working sets to save as a routine', ''); return; }
+
+  formModal({
+    title: 'Save as routine',
+    fields: [{ name: 'name', label: 'Routine name', value: w.name || '', required: true }],
+    submitText: 'Save',
+    onSubmit: async v => {
+      const { error } = await sb.from('workout_templates').insert({
+        user_id: getUid(), name: v.name.trim(), exercises: templateExercises
+      });
+      if (error) throw error;
+      toast('Routine saved', 'ok');
+      renderFitness(root);
+    }
+  });
 }
 
 function deleteWorkout(w, root) {
@@ -307,10 +494,8 @@ function addWeightForm(root) {
     ],
     submitText: 'Save',
     onSubmit: async v => {
-      const { error } = await sb.from('weight_entries')
-        .insert({ ...v, weight: displayToKg(v.weight), user_id: getUid() });
-      if (error) throw error;
-      toast('Logged', 'ok');
+      const { queued } = await queuedInsert('weight_entries', { ...v, weight: displayToKg(v.weight), user_id: getUid() });
+      toast(queued ? 'Saved offline — will sync' : 'Logged', 'ok');
       renderFitness(root);
     }
   });
@@ -608,7 +793,7 @@ export function workoutBuilder(root, prefill) {
 
     err.hidden = true; saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
-      const { error } = await sb.from('workouts').insert({
+      const { queued } = await queuedInsert('workouts', {
         user_id: getUid(),
         workout_date: dateInput.value || todayISO(),
         name: nameInput.value.trim(),
@@ -616,7 +801,6 @@ export function workoutBuilder(root, prefill) {
         exercises,
         duration_seconds: Math.max(0, Math.round((Date.now() - startedAt) / 1000))
       });
-      if (error) throw error;
       draftFinalized = true;
       discardWorkoutDraft();
       closeModal();
@@ -624,87 +808,12 @@ export function workoutBuilder(root, prefill) {
       // the only fix was leaving and reopening the app. Stop it explicitly.
       stopRestTimer();
 
-      // The whole progression pipeline (PR/goal detection, achievement
-      // unlocks, XP/Plate award) is skipped entirely while on cooldown —
-      // not just the award() call. Detecting a PR or completing a goal
-      // would otherwise mark it permanently (personal_records upsert,
-      // fitness_goals.achieved, achievements table) with no XP ever paid
-      // out for it, since award() refuses to grant XP during cooldown.
-      // Skipping everything defers detection cleanly to the next
-      // non-cooldown save — zero data loss, no burned rewards.
-      let gains = null, cooldownUntil = null, prEvents = [];
-      try {
-        cooldownUntil = await isOnCooldown();
-        if (!cooldownUntil) {
-          const totalSets = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
-          prEvents = await detectAndSavePRs(exercises);
-          const goalEvents = await checkGoals();
-          gains = await award([{ type: 'workout', sets: totalSets }, ...prEvents, ...goalEvents]);
-        }
-      } catch { /* progression failure shouldn't hide that the workout saved */ }
-
-      if (cooldownUntil) {
-        const mins = Math.max(1, Math.round((cooldownUntil - new Date()) / 60000));
-        toast(`Workout saved 💪 · On cooldown — ${Math.floor(mins / 60)}h ${mins % 60}m left`, 'ok');
-      } else if (gains) {
-        const bits = [`+${gains.xpGain} XP`, `+${gains.platesGain} Plates`];
-        if (gains.boosterApplied) bits.push(`⚡${gains.boosterApplied}× boost`);
-        if (gains.eventApplied) bits.push('⚡ Double weekend!');
-        if (gains.levelsGained > 0) bits.push(gains.levelsGained > 1 ? `Level up ×${gains.levelsGained}!` : 'Level up!');
-        toast(bits.join(' · '), 'ok');
-        if (gains.levelsGained > 0) { celebrate(); playSound('level_up'); }
-        else if (prEvents.length) playSound('pr');
+      if (queued) {
+        // No signal — XP/PRs/achievements/rank-up all need the database, so
+        // they land on sync instead, via the registered flush handler below.
+        toast('Saved offline — XP/PRs will apply once you\'re back online', 'ok');
       } else {
-        toast('Workout saved 💪', 'ok');
-      }
-
-      // Achievement check is separate + best-effort, and also fully skipped
-      // during cooldown (see above) — it must never block the workout save.
-      if (!cooldownUntil) {
-        try {
-          const prog = gains?.progress || await loadProgress();
-          const { data: wRows } = await sb.from('workouts').select('workout_date').eq('user_id', getUid());
-          const streak = await computeStreak(wRows || []);
-          const stats = await loadStats(prog, streak.current);
-          const achEvents = await checkAchievements(stats);
-          if (achEvents.length) {
-            const achGains = await award(achEvents);
-            for (const a of achEvents) toast(`🏆 ${a.label} unlocked! +${a.xp} XP · +${a.plates} Plates`, 'ok');
-            celebrate();
-            if (achGains?.levelsGained > 0) toast(achGains.levelsGained > 1 ? `Level up ×${achGains.levelsGained}!` : 'Level up!', 'ok');
-          }
-        } catch { /* best-effort — achievements can catch up on the next save */ }
-      }
-
-      // Rank-up celebration — also best-effort + skipped on cooldown (a rank
-      // change is a byproduct of the PRs just detected above, so if those
-      // were skipped there's nothing new to detect anyway). Compares the
-      // freshly computed overall rank's globalIndex (0-30) against the last
-      // globalIndex stored in fitness_progress.rank_label — "Godly" is
-      // stored as the literal string once achieved (globalIndex alone can't
-      // tell Godly apart from a maxed Grand Champion 3, since Godly doesn't
-      // raise the index further).
-      if (!cooldownUntil) {
-        try {
-          const overall = await loadOverallRank();
-          if (overall) {
-            const prog = await loadProgress();
-            const prevStored = prog.rank_label;
-            const prevIsGodly = prevStored === 'Godly';
-            const prevIndex = prevIsGodly ? 30 : (prevStored != null ? Number(prevStored) : -1);
-            const newIsGodly = !!overall.isGodly;
-            const increased = newIsGodly && !prevIsGodly ? true : (!newIsGodly && overall.globalIndex > prevIndex);
-            const toStore = newIsGodly ? 'Godly' : String(overall.globalIndex);
-            if (increased) {
-              celebrate();
-              playSound('rank_up');
-              toast(`🏅 You reached ${overall.label}!`, 'ok');
-            }
-            if (toStore !== prevStored) {
-              await sb.from('fitness_progress').update({ rank_label: toStore }).eq('user_id', getUid());
-            }
-          }
-        } catch { /* best-effort — rank-up detection can catch up on the next save */ }
+        await runPostWorkoutPipeline(exercises);
       }
 
       renderFitness(root);

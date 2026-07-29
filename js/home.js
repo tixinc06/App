@@ -10,6 +10,7 @@ import { loadFriendships } from './profile.js';
 import { isAdmin } from './admin.js';
 import { computeStreak } from './streaks.js';
 import { loadTopBarGoal } from './resellgoals.js';
+import { pendingCount } from './offlinequeue.js';
 
 const SECTIONS = [
   { key: 'resell', icon: '📦', name: 'Reselling', sub: 'Inventory, sales & profit' },
@@ -198,6 +199,15 @@ function statCell(label, value, sub) {
 
 function renderDashboard(wrap, d, onSelect, root) {
   wrap.innerHTML = '';
+
+  // Reflects the queue as it stood when Home last rendered — it clears on
+  // the next visit here after a sync, rather than updating live in place.
+  const pending = pendingCount();
+  if (pending > 0) {
+    wrap.append(el('div', { class: 'card sync-banner' }, [
+      el('span', {}, `⏳ ${pending} change${pending === 1 ? '' : 's'} waiting to sync`)
+    ]));
+  }
 
   // ── Today snapshot ──
   const calStat = statCell('Calories', d.calorieTarget ? `${num(d.todayCalories)} / ${num(d.calorieTarget)}` : num(d.todayCalories),

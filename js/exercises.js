@@ -10,7 +10,7 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import { el, toast } from './ui.js';
-import { exerciseThumb } from './exercisemedia.js';
+import { exerciseThumb, archetypeFor } from './exercisemedia.js';
 
 export const PREMADE_EXERCISES = {
   Chest: [
@@ -41,6 +41,40 @@ export const PREMADE_EXERCISES = {
     'Running', 'Cycling', 'Rowing Machine', 'Jump Rope', 'Stair Climber', 'Elliptical'
   ]
 };
+
+// Reverse name → muscle-group lookup, built once from PREMADE_EXERCISES.
+let nameToGroup = null;
+function catalogGroupOf(name) {
+  if (!nameToGroup) {
+    nameToGroup = {};
+    for (const [group, names] of Object.entries(PREMADE_EXERCISES)) {
+      for (const n of names) nameToGroup[n] = group;
+    }
+  }
+  return nameToGroup[name] || null;
+}
+
+// exercisemedia.js's archetypeFor() already keyword-matches a name against
+// the same kind of movement patterns (bench/squat/row/curl/…) to pick a
+// thumbnail SVG — reuse that classification rather than re-deriving it, just
+// mapped to a muscle group instead of an art asset.
+const ARCHETYPE_TO_GROUP = {
+  'barbell-bench': 'Chest', squat: 'Legs', deadlift: 'Back', pullup: 'Back', row: 'Back',
+  ohp: 'Shoulders', curl: 'Arms', raise: 'Shoulders', 'cable-triceps': 'Arms',
+  core: 'Core', run: 'Cardio', bike: 'Cardio', 'jump-rope': 'Cardio'
+};
+
+// Best-effort muscle group for training-volume analytics. Exact catalog
+// names resolve directly; anything else (a custom exercise, a typo, a
+// name typed slightly differently) falls back to a keyword guess so it
+// still counts toward SOME group instead of silently vanishing from the
+// muscle-group balance chart. `machine`/`kettlebell`/no-match fall to 'Other'.
+export function muscleGroupOf(name) {
+  const exact = catalogGroupOf(name);
+  if (exact) return exact;
+  const archetype = archetypeFor(name, null);
+  return ARCHETYPE_TO_GROUP[archetype] || 'Other';
+}
 
 let cachedCustom = null;
 let cachedRecent = null;

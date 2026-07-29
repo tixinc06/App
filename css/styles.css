@@ -108,6 +108,9 @@ textarea{resize:vertical; min-height:70px}
 .section-head{display:flex; align-items:center; justify-content:space-between; margin:4px 2px 14px}
 .section-head h2{font-size:15px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em}
 
+.sync-banner{padding:10px 14px; margin-bottom:14px; font-size:12px; font-weight:600;
+  color:var(--amber); background:rgba(255,179,65,.1); border-color:rgba(255,179,65,.3)}
+
 .stat-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:20px}
 .stat{padding:16px}
 .stat .k{font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
@@ -318,12 +321,13 @@ body.rt-active .modal{padding-bottom:calc(22px + 96px + var(--safe-b))}
 
 /* ── Segmented control ───────────────────────────────────────────────────── */
 .segmented{position:relative; display:flex; gap:4px; background:var(--bg2); border:1px solid var(--border);
-  border-radius:12px; padding:4px; margin-bottom:18px}
+  border-radius:12px; padding:4px; margin-bottom:18px; overflow-x:auto; scrollbar-width:none}
+.segmented::-webkit-scrollbar{display:none}
 .segment-indicator{position:absolute; top:4px; bottom:4px; left:0; z-index:0; border-radius:9px;
   background:linear-gradient(180deg,var(--primary-soft),var(--primary));
   transition:transform .3s cubic-bezier(.22,1,.36,1), width .3s cubic-bezier(.22,1,.36,1)}
-.segment{position:relative; z-index:1; flex:1; min-width:0; border:none; background:none; color:var(--muted);
-  font-weight:700; font-size:12px; padding:8px 4px; border-radius:9px; transition:color .15s, transform .1s ease;
+.segment{position:relative; z-index:1; flex:1 0 auto; min-width:0; border:none; background:none; color:var(--muted);
+  font-weight:700; font-size:12px; padding:8px 10px; border-radius:9px; transition:color .15s, transform .1s ease;
   overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
 .segment:active{transform:scale(.94)}
 .segment.active{color:var(--on-primary)}

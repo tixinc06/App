@@ -439,6 +439,10 @@ export function segmented(options, active, onChange) {
     if (!activeBtn) return;
     indicator.style.width = activeBtn.offsetWidth + 'px';
     indicator.style.transform = `translateX(${activeBtn.offsetLeft}px)`;
+    // A control with enough tabs to overflow (e.g. Reselling's 6) scrolls
+    // horizontally — keep the active tab in view after a re-render lands on
+    // one that's currently off-screen.
+    activeBtn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   }, 0);
   return wrap;
 }

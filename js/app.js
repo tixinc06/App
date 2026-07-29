@@ -15,6 +15,7 @@ import { renderAdmin } from './admin.js';
 import { loadWeightUnit } from './units.js';
 import { renderSettings } from './settings.js';
 import { sb } from './supabase.js';
+import { initOfflineQueue } from './offlinequeue.js';
 
 // Best-effort: falls back to the default £ on any failure (e.g. the
 // migration hasn't been run yet) — mirrors js/units.js's loadWeightUnit().
@@ -345,6 +346,7 @@ async function main() {
       loadWeightUnit();
       loadCurrency();
       mountRestTimer();
+      initOfflineQueue();
       maybeShowWelcome();
     } else {
       showOnly('auth-screen');

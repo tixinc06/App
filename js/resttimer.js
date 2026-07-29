@@ -15,6 +15,7 @@ import { getUid } from './auth.js';
 
 const STATE_KEY = 'restTimerState';       // {endsAt, paused, pausedRemainingMs, durationMs}
 const DURATION_KEY = 'restTimerDuration'; // last-used seconds
+const STALE_REPLAY_MS = 5 * 60 * 1000;    // don't replay the alarm for a miss older than this
 const RING_R = 30;
 const RING_C = 2 * Math.PI * RING_R;
 
@@ -307,9 +308,21 @@ export function mountRestTimer() {
     state = saved;
     if (state.durationMs === undefined) state.durationMs = state.pausedRemainingMs || 0;
     if (!state.paused && remainingMs() <= 0) {
-      // Expired while backgrounded/closed — fire the missed completion now
-      // rather than discarding it silently.
-      finish();
+      // Expired while backgrounded/closed. Reported bug: this used to always
+      // fire the full alarm + vibrate + flash on open, even for a timer that
+      // expired hours or days ago (the app just hadn't been reopened) — an
+      // unbounded-age replay screaming at you first thing in the morning.
+      // Only replay the completion signal for a RECENT miss; an older one is
+      // restored silently, same as if it had simply been dismissed.
+      const staleMs = Date.now() - new Date(state.endsAt).getTime();
+      if (staleMs <= STALE_REPLAY_MS) {
+        finish();
+      } else {
+        const pushId = state.pushId;
+        state = null;
+        persist();
+        deleteScheduledPush(pushId);
+      }
     } else {
       requestWakeLock('resttimer');
       startTicking();

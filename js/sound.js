@@ -8,15 +8,17 @@
 // the app's first pointer interaction. Nothing plays once the app is fully
 // closed (same platform limit as the rest timer's completion signal).
 //
-// The rest-timer alarm (`timer_done`) is a special case, fixed this round:
-// Web Audio (used by playTone() below) plays on iOS Safari's AMBIENT audio
-// channel, which iOS SILENCES whenever the ringer switch is off — exactly
-// how a phone usually sits at the gym. An <audio> element plays on the MEDIA
-// channel instead, which is audible with the ringer off. So the alarm is
-// synthesized to a WAV at runtime (no binary asset needed) and played via a
-// cached <audio> element, with `navigator.audioSession` set to 'playback'
-// where the browser supports it (Safari-only, editor's-draft API — always
-// feature-detected, never assumed).
+// The rest-timer alarm (`timer_done`) is a special case: it's synthesized to
+// a WAV at runtime (no binary asset needed) and played via a cached <audio>
+// element. `navigator.audioSession` is set to 'ambient' for the duration of
+// playback (Safari-only, editor's-draft API — always feature-detected, never
+// assumed) — 'ambient' is the MIXABLE category, so the beep plays alongside
+// whatever else is already playing (music in headphones) instead of
+// interrupting it, and the session type is restored the moment the beep
+// ends. Reported bug: an earlier version used 'playback' (the non-mixing
+// category) and never restored it, which silently killed background music
+// for the rest of the session. The trade-off of 'ambient' is that it's
+// silenced by the iOS ringer switch, unlike 'playback' — see playAlarm().
 const MUTE_KEY = 'soundMuted';
 
 const SOUNDS = {
@@ -54,9 +56,15 @@ function playTone(freq) {
   const gain = c.createGain();
   osc.connect(gain); gain.connect(c.destination);
   osc.frequency.value = freq;
-  gain.gain.setValueAtTime(0.18, c.currentTime);
+  // A short linear attack avoids the click an instant 0→0.18 gain jump
+  // produces (the WAV alarm already fades in for the same reason).
+  gain.gain.setValueAtTime(0.0001, c.currentTime);
+  gain.gain.linearRampToValueAtTime(0.18, c.currentTime + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.5);
   osc.start(); osc.stop(c.currentTime + 0.5);
+  // Don't hold the audio session open indefinitely — suspend once this
+  // tone's envelope has finished, ctx() resumes it again on next use.
+  setTimeout(() => { if (audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(() => {}); }, 550);
 }
 
 const fileCache = {};
@@ -127,25 +135,47 @@ function getAlarmAudio() {
 }
 
 function playAlarm() {
-  // Editor's-draft Safari-only API — feature-detect, never assume. Routes
-  // playback to the media channel so it survives the ringer switch.
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* unsupported */ }
   const a = getAlarmAudio();
   if (!a) { playTone(1000); return; }
+  // Editor's-draft Safari-only API — feature-detect, never assume. 'ambient'
+  // is the MIXABLE category: the beep plays alongside whatever's already
+  // playing (e.g. music in headphones) instead of stopping it. The
+  // trade-off: unlike 'playback', 'ambient' audio is silenced by the iOS
+  // ringer switch — a silenced phone relies on vibration + the full-screen
+  // flash (flashFinished, resttimer.js) instead, which is fine since those
+  // were already the primary signal there (no navigator.vibrate on iOS
+  // Safari, but the flash always renders regardless of platform).
+  let restoreType = null;
+  try {
+    if (navigator.audioSession) {
+      restoreType = navigator.audioSession.type;
+      navigator.audioSession.type = 'ambient';
+    }
+  } catch { /* unsupported */ }
+  const restore = () => {
+    try { if (navigator.audioSession && restoreType != null) navigator.audioSession.type = restoreType; } catch { /* unsupported */ }
+  };
+  a.addEventListener('ended', restore, { once: true });
+  a.addEventListener('error', restore, { once: true });
   try { a.currentTime = 0; } catch { /* not loaded yet — play() still queues it */ }
-  a.play().catch(() => playTone(1000));
+  a.play().catch(() => { restore(); playTone(1000); });
 }
 
 // Primes both audio paths from the required first user gesture (iOS blocks
 // all audio — Web Audio AND <audio> elements — until one fires from inside a
-// real pointer event). Playing+immediately pausing the alarm element here is
-// the standard unlock trick for a real, pre-built element.
+// real pointer event). Playing+immediately pausing the alarm element is the
+// standard unlock trick for a real, pre-built element — but doing that at
+// volume 1 leaks an audible chirp before the pause takes effect (the pause
+// only runs once the play() promise resolves, by which point playback has
+// already started). Mute it for just this priming play so nothing is heard.
 function unlockOnFirstGesture() {
   const c = ctx();
   if (c && c.state === 'suspended') c.resume().catch(() => {});
   const a = getAlarmAudio();
   if (a) {
-    a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+    const wasVolume = a.volume;
+    a.volume = 0;
+    a.play().then(() => { a.pause(); a.currentTime = 0; a.volume = wasVolume; }).catch(() => { a.volume = wasVolume; });
   }
 }
 document.addEventListener('pointerdown', unlockOnFirstGesture, { once: true, passive: true });
