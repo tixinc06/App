@@ -11,7 +11,7 @@ import {
   el, num, fmtDate, toast, formModal, confirmModal, actionSheet, emptyState,
   skeleton, staggerChildren, countUp, celebrate, todayISO, isoOf
 } from './ui.js';
-import { loadProgress, xpToNext, maxLevelForTrack, prestige } from './progression.js';
+import { loadProgress, xpToNext, maxLevelForTrack, prestige, deletePR } from './progression.js';
 import { MAX_PRESTIGE, SHOP_ITEMS, PRESTIGE_TITLES, MASTER_TITLE, weekendEventMsLeft } from './gamedata.js';
 import { computeStreak } from './streaks.js';
 import { loadStats, loadAchievementsView } from './achievements.js';
@@ -650,6 +650,30 @@ function prRow(p, container, root) {
       el('div', { class: 'title' }, p.exercise),
       el('div', { class: 'sub' },
         `${fmtWeight(p.best_weight)} × ${p.best_reps} · e1RM ~${fmtWeight(p.best_e1rm)} · ${fmtDate((p.achieved_at || '').slice(0, 10))}`)
-    ])
+    ]),
+    el('button', {
+      class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
+      onClick: e => { e.stopPropagation(); prActions(p, container, root); }
+    }, '⋯')
+  ]);
+}
+
+// A wrong PR (fat-fingered weight, typo'd exercise name) previously had no
+// in-app remedy — deleting it here lets the next real set for that exercise
+// re-establish a correct one from scratch. See progression.js's deletePR().
+function prActions(p, container, root) {
+  actionSheet(p.exercise, [
+    { label: '🗑️ Delete PR', danger: true, onClick: () => {
+      confirmModal({
+        title: 'Delete this PR?',
+        message: 'This only removes the record — it does not touch any logged workout.',
+        confirmText: 'Delete',
+        onConfirm: async () => {
+          await deletePR(p.exercise);
+          toast('PR deleted');
+          renderPRsView(container, root);
+        }
+      });
+    } }
   ]);
 }

@@ -4,6 +4,7 @@
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import * as GD from './gamedata.js';
+import { muscleGroupOf } from './exercises.js';
 
 // Fetch the user's progress row, lazily creating it on first use.
 export async function loadProgress() {
@@ -167,6 +168,13 @@ export async function detectAndSavePRs(exercises) {
   const prEvents = [];
   for (const ex of exercises) {
     if (!ex.name || !ex.sets?.length) continue;
+    // Cardio has no meaningful 1-rep-max — a Running "PR" ranked on the same
+    // bodyweight-ratio strength ladder as a bench press is nonsensical (it
+    // was falling through to the generic FALLBACK_STANDARD curve in
+    // js/standards.js). Exclude it at the one place personal_records rows
+    // are ever written, so ranks.js/progress.js/exercisedetail.js never see
+    // a cardio row in the first place.
+    if (muscleGroupOf(ex.name) === 'Cardio') continue;
     let bestSet = null, bestE1rm = 0;
     for (const s of ex.sets) {
       if (s.warmup) continue; // a warm-up set must never count as a PR
@@ -189,6 +197,18 @@ export async function detectAndSavePRs(exercises) {
     }
   }
   return prEvents;
+}
+
+// Deletes a wrong/fat-fingered PR outright, rather than trying to correct
+// it — a corrected value would need to be re-validated against the actual
+// workout history anyway, and the next real set for that exercise will
+// re-establish a PR from scratch. This was previously impossible: a bad PR
+// permanently poisoned ranks.js's division placement and progression.js's
+// own goal-completion checks (checkGoals reads personal_records), with no
+// in-app remedy at all.
+export async function deletePR(exercise) {
+  const { error } = await sb.from('personal_records').delete().eq('user_id', getUid()).eq('exercise', exercise);
+  if (error) throw error;
 }
 
 // ── Goals ─────────────────────────────────────────────────────────────────────

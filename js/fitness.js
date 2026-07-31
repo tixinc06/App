@@ -399,6 +399,17 @@ function workoutRow(w, root) {
   ]);
 }
 
+// A cardio set (Running, Cycling, …) has a duration but no meaningful
+// weight×reps — a set with both shows both, so a weighted-vest run still
+// reads sensibly.
+function setSummary(s) {
+  const parts = [];
+  if ((s.weight || 0) > 0 || (s.reps || 0) > 0) parts.push(`${fmtWeight(s.weight)}×${num(s.reps)}`);
+  if (s.duration_seconds) parts.push(`${Math.round(s.duration_seconds / 60)} min`);
+  if (!parts.length) parts.push(`${fmtWeight(s.weight)}×${num(s.reps)}`);
+  return parts.join(' · ') + (s.warmup ? ' (w)' : '');
+}
+
 export function viewWorkout(w, root) {
   const exs = Array.isArray(w.exercises) ? w.exercises : [];
   const body = exs.length ? exs.map(e =>
@@ -407,7 +418,7 @@ export function viewWorkout(w, root) {
       el('div', { style: 'min-width:0' }, [
         el('div', { style: 'font-weight:700;margin-bottom:4px' }, e.name || 'Exercise'),
         el('div', { class: 'muted', style: 'font-size:14px' },
-          (e.sets || []).map(s => `${fmtWeight(s.weight)}×${num(s.reps)}${s.warmup ? ' (w)' : ''}`).join('   ') || 'No sets')
+          (e.sets || []).map(s => setSummary(s)).join('   ') || 'No sets')
       ])
     ])) : [el('p', { class: 'muted' }, 'No exercises recorded.')];
 
@@ -571,16 +582,19 @@ export function workoutBuilder(root, prefill) {
         // An untouched prefilled weight isn't something the user entered —
         // don't serialize it as if it were, or a workout nobody typed
         // anything into would still leave a resumable draft behind.
-        sets: e.sets.map(s => ({ weight: s.weightPrefilled ? '' : s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked, warmup: s.warmup }))
+        sets: e.sets.map(s => ({
+          weight: s.weightPrefilled ? '' : s.weightInput.value, reps: s.repsInput.value,
+          ticked: s.ticked, warmup: s.warmup, durationMin: s.durationInput.value
+        }))
       }))
     };
     const hasContent = draft.name.trim() ||
-      draft.exercises.some(e => e.name.trim() || e.sets.some(s => s.weight || s.reps));
+      draft.exercises.some(e => e.name.trim() || e.sets.some(s => s.weight || s.reps || s.durationMin));
     if (hasContent) localStorage.setItem(draftKey(), JSON.stringify(draft));
     else localStorage.removeItem(draftKey());
   }
 
-  function addExercise(initialName = '', initialSets = 0) {
+  function addExercise(initialName = '', initialSets = 0, initialReps = '') {
     const setsWrap = el('div', { style: 'margin:8px 0 0' });
     const sets = [];
     const nameInput = el('input', { placeholder: 'Exercise name', value: initialName, style: 'margin-top:0' });
@@ -594,6 +608,17 @@ export function workoutBuilder(root, prefill) {
       thumbWrap.append(exerciseThumb(nameInput.value.trim(), null, { size: 40 }));
     }
     nameInput.addEventListener('input', refreshThumb);
+
+    // Cardio (Running, Cycling, Rowing, …) has no meaningful weight×reps —
+    // give every set row a duration field too, shown only for a cardio
+    // exercise so a strength set's row stays uncluttered. Weight/reps stay
+    // available alongside it (e.g. a weighted-vest run), just optional.
+    function isCardio() { return muscleGroupOf(nameInput.value.trim()) === 'Cardio'; }
+    function refreshCardioVisibility() {
+      const cardio = isCardio();
+      for (const s of sets) s.durationInput.style.display = cardio ? '' : 'none';
+    }
+    nameInput.addEventListener('input', refreshCardioVisibility);
 
     // Per-set "last time" ghost values (B1) — resolved async by refreshHint
     // below, then reapplied to every current row by applyPrevHints() so a
@@ -709,11 +734,15 @@ export function workoutBuilder(root, prefill) {
     nameInput.addEventListener('input', refreshHint);
     if (initialName) refreshHint();
 
-    function addSet(weight = '', reps = '', ticked = false, warmup = false) {
+    function addSet(weight = '', reps = '', ticked = false, warmup = false, durationMin = '') {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: String(weightStep()), placeholder: weightUnit(), value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
+      const dI = el('input', {
+        type: 'number', inputmode: 'decimal', step: '0.5', min: '0', placeholder: 'min', value: durationMin,
+        style: `margin-top:0;flex:0 0 60px;display:${isCardio() ? '' : 'none'}`
+      });
       const capEl = el('div', { class: 'set-prev', hidden: true });
-      const rowObj = { weightInput: wI, repsInput: rI, ticked, warmup, capEl, weightPrefilled: false };
+      const rowObj = { weightInput: wI, repsInput: rI, durationInput: dI, ticked, warmup, capEl, weightPrefilled: false };
       const tickBtn = el('button', {
         type: 'button', class: 'set-tick' + (ticked ? ' ticked' : ''), title: 'Mark set done (starts rest timer)',
         onClick: () => {
@@ -739,9 +768,10 @@ export function workoutBuilder(root, prefill) {
         refreshMedal(); scheduleDraftSave();
       });
       rI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
+      dI.addEventListener('input', () => { scheduleDraftSave(); });
       const row = el('div', { style: 'margin-bottom:8px' }, [
         el('div', { class: 'row', style: 'align-items:center' }, [
-          tickBtn, warmupBtn, wI, rI,
+          tickBtn, warmupBtn, wI, rI, dI,
           el('button', {
             type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto',
             onClick: () => { const i = sets.indexOf(rowObj); if (i > -1) sets.splice(i, 1); row.remove(); scheduleDraftSave(); refreshMedal(); }
@@ -757,9 +787,13 @@ export function workoutBuilder(root, prefill) {
     // `initialSets` is either a plain count (template prefill — empty rows)
     // or an array of {weight,reps,ticked,warmup} (draft restore — exact values).
     if (Array.isArray(initialSets)) {
-      for (const s of initialSets) addSet(s.weight, s.reps, !!s.ticked, !!s.warmup);
+      for (const s of initialSets) addSet(s.weight, s.reps, !!s.ticked, !!s.warmup, s.durationMin || '');
     } else {
-      for (let i = 0; i < Math.max(0, initialSets); i++) addSet();
+      // Reported bug: a template's rep target (e.g. "3 sets of 8") was
+      // collected and stored but never actually reached the set rows when
+      // the workout started — addSet() was called with no args, so reps
+      // silently defaulted to empty every time.
+      for (let i = 0; i < Math.max(0, initialSets); i++) addSet('', initialReps);
     }
 
     const exObj = { nameInput, sets, prMedal };
@@ -783,7 +817,7 @@ export function workoutBuilder(root, prefill) {
   }
 
   if (prefill?.exercises?.length) {
-    for (const ex of prefill.exercises) addExercise(ex.name, ex.sets);
+    for (const ex of prefill.exercises) addExercise(ex.name, ex.sets, ex.reps || '');
   } else {
     addExercise();
   }
@@ -808,11 +842,17 @@ export function workoutBuilder(root, prefill) {
         name: e.nameInput.value.trim(),
         sets: e.sets
           // A set whose weight is still a greyed-out prefill the user never
-          // touched, and that was never given reps either, wasn't actually
-          // performed — drop it before it can be saved as a real 0-rep set.
-          .filter(s => !(s.weightPrefilled && (Number(s.repsInput.value) || 0) === 0))
-          .map(s => ({ weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0, warmup: !!s.warmup }))
-          .filter(s => s.reps > 0 || s.weight > 0)
+          // touched, and that was never given reps or a duration either,
+          // wasn't actually performed — drop it before it can be saved as a
+          // real 0-rep set.
+          .filter(s => !(s.weightPrefilled && (Number(s.repsInput.value) || 0) === 0 && (Number(s.durationInput.value) || 0) === 0))
+          .map(s => {
+            const set = { weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0, warmup: !!s.warmup };
+            const durMin = Number(s.durationInput.value) || 0;
+            if (durMin > 0) set.duration_seconds = Math.round(durMin * 60);
+            return set;
+          })
+          .filter(s => s.reps > 0 || s.weight > 0 || (s.duration_seconds || 0) > 0)
       }))
       .filter(e => e.name || e.sets.length);
 

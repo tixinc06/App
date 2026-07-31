@@ -4,7 +4,7 @@
 // function's `reminders` branch (see migration-round6.sql).
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
-import { el, toast, skeleton, emptyState, getCurrency, setCurrency } from './ui.js';
+import { el, toast, skeleton, emptyState, getCurrency, setCurrency, todayISO } from './ui.js';
 import { weightUnit, saveWeightUnit } from './units.js';
 import { isMuted, toggleMuted } from './sound.js';
 
@@ -24,6 +24,38 @@ async function loadSettings() {
   const { data, error } = await sb.from('user_settings').select('*').eq('user_id', getUid()).maybeSingle();
   if (error) throw error;
   return data || {};
+}
+
+// There was previously no way to get your own data OUT of the app at all —
+// combined with the admin erase-progress action being a real, one-way
+// operation, that meant no backup and no tax-season paper trail. Bundles
+// the tables that actually matter to a user (workout history, bodyweight,
+// PRs, body measurements) into one JSON file, built and downloaded entirely
+// client-side — nothing is emailed or uploaded anywhere.
+async function exportAllData() {
+  const uid = getUid();
+  const [workouts, weights, prs, measurements] = await Promise.all([
+    sb.from('workouts').select('workout_date,name,notes,exercises,duration_seconds').eq('user_id', uid).order('workout_date'),
+    sb.from('weight_entries').select('entry_date,weight').eq('user_id', uid).order('entry_date'),
+    sb.from('personal_records').select('exercise,best_weight,best_reps,best_e1rm,achieved_at').eq('user_id', uid),
+    sb.from('body_measurements').select('entry_date,values,note').eq('user_id', uid).order('entry_date')
+  ]);
+  for (const r of [workouts, weights, prs, measurements]) if (r.error) throw r.error;
+
+  const bundle = {
+    exported_at: new Date().toISOString(),
+    workouts: workouts.data || [],
+    weight_entries: weights.data || [],
+    personal_records: prs.data || [],
+    body_measurements: measurements.data || []
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: `improvement-export-${todayISO()}.json` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function renderSettings(container, root) {
@@ -67,6 +99,22 @@ export async function renderSettings(container, root) {
       toast(ex.message || 'Failed to save', 'err');
     }
   });
+
+  // ── Data export ──
+  const exportBtn = el('button', {
+    class: 'btn btn-sm btn-ghost',
+    onClick: async () => {
+      exportBtn.disabled = true; exportBtn.textContent = 'Preparing…';
+      try {
+        await exportAllData();
+        toast('Export downloaded', 'ok');
+      } catch (ex) {
+        toast(ex.message || 'Export failed', 'err');
+      } finally {
+        exportBtn.disabled = false; exportBtn.textContent = '⬇️ Export my data (JSON)';
+      }
+    }
+  }, '⬇️ Export my data (JSON)');
 
   // ── Sound ──
   const soundBtn = el('button', {
@@ -134,6 +182,13 @@ export async function renderSettings(container, root) {
 
     el('div', { class: 'section-head' }, [el('h2', {}, 'Sound')]),
     el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:18px' }, [soundBtn]),
+
+    el('div', { class: 'section-head' }, [el('h2', {}, 'Data & privacy')]),
+    el('div', { class: 'card', style: 'padding:16px 18px;margin-bottom:18px' }, [
+      exportBtn,
+      el('div', { class: 'dim', style: 'font-size:11px;margin-top:8px' },
+        'Downloads a JSON file with your workouts, bodyweight log, personal records and body measurements.')
+    ]),
 
     el('div', { class: 'section-head' }, [el('h2', {}, 'Reminders')]),
     el('div', { class: 'card', style: 'padding:16px 18px' }, [

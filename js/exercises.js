@@ -93,6 +93,16 @@ export async function saveCustomExercise(name) {
   return trimmed;
 }
 
+// Custom exercises were create-only — a typo saved here (e.g. "Bech Press")
+// polluted the picker permanently with no way to remove it. Deleting the
+// catalog entry doesn't touch any already-logged workout or PR — those
+// store the exercise name directly in their own rows, independent of this
+// table, which only feeds the autocomplete list.
+export async function deleteCustomExercise(name) {
+  const { error } = await sb.from('custom_exercises').delete().eq('user_id', getUid()).eq('name', name);
+  if (error) throw error;
+}
+
 // Unique exercise names from the user's most recent workouts, newest first.
 export async function loadRecentExercises(limit = 8) {
   const { data, error } = await sb.from('workouts')
@@ -222,7 +232,17 @@ export function attachExercisePicker(input) {
       }, [
         exerciseThumb(r.name, r.group, { size: 36 }),
         el('span', { class: 'grow' }, r.name),
-        el('span', { class: 'ex-group-tag' }, r.group)
+        el('span', { class: 'ex-group-tag' }, r.group),
+        r.group === 'Custom' ? el('button', {
+          type: 'button', class: 'btn btn-sm btn-ghost', style: 'flex:0 0 auto;padding:2px 8px',
+          title: 'Remove from custom exercises',
+          onMousedown: e => {
+            e.preventDefault(); e.stopPropagation();
+            deleteCustomExercise(r.name)
+              .then(() => { cachedCustom = null; toast('Removed', 'ok'); render(); })
+              .catch(ex => toast(ex.message || 'Failed to remove', 'err'));
+          }
+        }, '✕') : null
       ]));
     }
 
