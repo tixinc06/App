@@ -568,7 +568,10 @@ export function workoutBuilder(root, prefill) {
       restSeconds, startedAt,
       exercises: state.map(e => ({
         name: e.nameInput.value,
-        sets: e.sets.map(s => ({ weight: s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked, warmup: s.warmup }))
+        // An untouched prefilled weight isn't something the user entered —
+        // don't serialize it as if it were, or a workout nobody typed
+        // anything into would still leave a resumable draft behind.
+        sets: e.sets.map(s => ({ weight: s.weightPrefilled ? '' : s.weightInput.value, reps: s.repsInput.value, ticked: s.ticked, warmup: s.warmup }))
       }))
     };
     const hasContent = draft.name.trim() ||
@@ -595,15 +598,28 @@ export function workoutBuilder(root, prefill) {
     // Per-set "last time" ghost values (B1) — resolved async by refreshHint
     // below, then reapplied to every current row by applyPrevHints() so a
     // set added before the fetch resolves still gets its hint once it lands.
+    // `prevWorkingSets` excludes warm-ups so row 0 never inherits a warm-up
+    // weight — `prevSets` (unfiltered) is kept separately for the "Last
+    // time: ..." summary line, which should still show everything done.
     let prevSets = null;
+    let prevWorkingSets = null;
     function applyPrevToRow(rowObj, i) {
-      const p = prevSets && prevSets[i];
+      const p = prevWorkingSets && prevWorkingSets[i];
       if (p) {
         const w = kgToDisplay(p.weight);
         rowObj.weightInput.placeholder = String(Math.round(w * 10) / 10);
         rowObj.repsInput.placeholder = String(p.reps);
         rowObj.capEl.textContent = `Last: ${num(w)}${weightUnit()} × ${num(p.reps)}`;
         rowObj.capEl.hidden = false;
+        // Prefill the WEIGHT only (reps stays for the user to fill in each
+        // time), greyed out via .ghost-value until edited. Never overwrite a
+        // value the user (or a draft restore) already put there.
+        if (!rowObj.weightPrefilled && rowObj.weightInput.value === '') {
+          const snapped = Math.round(w / weightStep()) * weightStep();
+          rowObj.weightInput.value = snapped;
+          rowObj.weightInput.classList.add('ghost-value');
+          rowObj.weightPrefilled = true;
+        }
       } else {
         rowObj.weightInput.placeholder = weightUnit();
         rowObj.repsInput.placeholder = 'reps';
@@ -652,10 +668,11 @@ export function workoutBuilder(root, prefill) {
       const name = nameInput.value.trim();
       medalSoundPlayed = false;
       refreshMedal();
-      if (!name) { hintEl.hidden = true; prevSets = null; applyPrevHints(); return; }
+      if (!name) { hintEl.hidden = true; prevSets = null; prevWorkingSets = null; applyPrevHints(); return; }
       hintTimer = setTimeout(async () => {
         const prev = await loadPreviousPerformance(name);
         prevSets = prev ? prev.sets : null;
+        prevWorkingSets = prev ? prev.sets.filter(s => !s.warmup) : null;
         applyPrevHints();
         if (!prev) { hintEl.hidden = true; return; }
         hintEl.innerHTML = '';
@@ -696,7 +713,7 @@ export function workoutBuilder(root, prefill) {
       const wI = el('input', { type: 'number', inputmode: 'decimal', step: String(weightStep()), placeholder: weightUnit(), value: weight, style: 'margin-top:0' });
       const rI = el('input', { type: 'number', inputmode: 'numeric', step: '1', placeholder: 'reps', value: reps, style: 'margin-top:0' });
       const capEl = el('div', { class: 'set-prev', hidden: true });
-      const rowObj = { weightInput: wI, repsInput: rI, ticked, warmup, capEl };
+      const rowObj = { weightInput: wI, repsInput: rI, ticked, warmup, capEl, weightPrefilled: false };
       const tickBtn = el('button', {
         type: 'button', class: 'set-tick' + (ticked ? ' ticked' : ''), title: 'Mark set done (starts rest timer)',
         onClick: () => {
@@ -716,7 +733,11 @@ export function workoutBuilder(root, prefill) {
           scheduleDraftSave();
         }
       }, 'W');
-      wI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
+      wI.addEventListener('input', () => {
+        rowObj.weightPrefilled = false;
+        wI.classList.remove('ghost-value');
+        refreshMedal(); scheduleDraftSave();
+      });
       rI.addEventListener('input', () => { refreshMedal(); scheduleDraftSave(); });
       const row = el('div', { style: 'margin-bottom:8px' }, [
         el('div', { class: 'row', style: 'align-items:center' }, [
@@ -786,6 +807,10 @@ export function workoutBuilder(root, prefill) {
       .map(e => ({
         name: e.nameInput.value.trim(),
         sets: e.sets
+          // A set whose weight is still a greyed-out prefill the user never
+          // touched, and that was never given reps either, wasn't actually
+          // performed — drop it before it can be saved as a real 0-rep set.
+          .filter(s => !(s.weightPrefilled && (Number(s.repsInput.value) || 0) === 0))
           .map(s => ({ weight: displayToKg(s.weightInput.value) || 0, reps: Number(s.repsInput.value) || 0, warmup: !!s.warmup }))
           .filter(s => s.reps > 0 || s.weight > 0)
       }))

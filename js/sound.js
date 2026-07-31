@@ -165,17 +165,23 @@ function playAlarm() {
 // all audio — Web Audio AND <audio> elements — until one fires from inside a
 // real pointer event). Playing+immediately pausing the alarm element is the
 // standard unlock trick for a real, pre-built element — but doing that at
-// volume 1 leaks an audible chirp before the pause takes effect (the pause
-// only runs once the play() promise resolves, by which point playback has
-// already started). Mute it for just this priming play so nothing is heard.
+// full volume leaks an audible chirp before the pause takes effect (the
+// pause only runs once the play() promise resolves, by which point playback
+// has already started).
+//
+// Reported bug: an earlier version silenced this with `a.volume = 0`, which
+// does NOT work on iOS Safari — `HTMLMediaElement.volume` is read-only there
+// and the assignment is silently ignored, so the chirp still played. `muted`
+// IS respected on iOS, so that's the lever this needs.
 function unlockOnFirstGesture() {
+  if (isMuted()) return; // no need to prime an audible element the user has turned off
   const c = ctx();
   if (c && c.state === 'suspended') c.resume().catch(() => {});
   const a = getAlarmAudio();
   if (a) {
-    const wasVolume = a.volume;
-    a.volume = 0;
-    a.play().then(() => { a.pause(); a.currentTime = 0; a.volume = wasVolume; }).catch(() => { a.volume = wasVolume; });
+    const wasMuted = a.muted;
+    a.muted = true;
+    a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = wasMuted; }).catch(() => { a.muted = wasMuted; });
   }
 }
 document.addEventListener('pointerdown', unlockOnFirstGesture, { once: true, passive: true });

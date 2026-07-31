@@ -1,26 +1,29 @@
-// Receipts vault: folders of purchase receipts (image or PDF) for the
-// Reselling section — proof of cost basis at tax time. Private bucket +
-// signed URLs, same model as js/photos.js and the resell item-photo path
-// in js/resell.js. A receipt can optionally link to a resell_items row.
+// Receipts: a flat, products-style image grid of purchase receipts (image or
+// PDF) for the Reselling section — proof of cost basis at tax time. Private
+// bucket + signed URLs, same model as js/photos.js and the resell
+// item-photo path in js/resell.js. A receipt can optionally link to a
+// resell_items row.
+//
+// A handful of receipts are BUILT IN — shipped as app assets in receipts/,
+// hardcoded below, visible to every user (not stored per-account, since
+// `receipts` is RLS-scoped to whoever uploaded a row — there is no way for a
+// database row to be "everyone's"). They render first, are never uploaded
+// anywhere, need no signed URL, and can't be deleted from here.
 import { sb } from './supabase.js';
 import { getUid } from './auth.js';
 import {
-  el, money, fmtDate, todayISO, toast, formModal, confirmModal, actionSheet, emptyState,
+  el, money, fmtDate, todayISO, toast, formModal, confirmModal, emptyState,
   skeleton, staggerChildren, openModal, closeModal
 } from './ui.js';
 
 const BUCKET = 'receipts';
 
-// null = folder grid; a folder id, or the string 'unfiled', = that folder's
-// contents. Module-level so it survives a re-render, same idiom resell.js
-// uses for `segment`.
-let openFolderId = null;
-
-async function loadFolders() {
-  const { data, error } = await sb.from('receipt_folders').select('*').order('created_at');
-  if (error) throw error;
-  return data || [];
-}
+const BUILTIN_RECEIPTS = [
+  { id: 'builtin-nb9060', name: 'New Balance 9060', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 160.04, image: './receipts/new-balance-9060.png' },
+  { id: 'builtin-miller', name: 'Blue Miller Set', merchant: 'JD Sports', receipt_date: '2026-05-17', amount: 70.98, image: './receipts/blue-miller-set.png' },
+  { id: 'builtin-coach', name: 'Coach Bag', merchant: 'Flannels', receipt_date: '2026-04-22', amount: 395.00, image: './receipts/coach-bag.png' },
+  { id: 'builtin-oncloud', name: 'On Cloud X', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 140.04, image: './receipts/on-cloud-x.png' }
+].map(r => ({ ...r, builtin: true }));
 
 async function loadReceipts() {
   const { data, error } = await sb.from('receipts').select('*').order('receipt_date', { ascending: false });
@@ -40,15 +43,16 @@ function extOf(name) {
 }
 
 function isImage(r) {
+  if (r.builtin) return true;
   return (r.mime_type || '').startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(r.storage_path);
 }
 
 export async function renderReceipts(body, root) {
   body.innerHTML = '';
-  body.append(skeleton(1, 'block'), skeleton(4, 'item'));
-  let folders, receipts;
+  body.append(skeleton(1, 'block'), skeleton(4, 'grid'));
+  let receipts;
   try {
-    [folders, receipts] = await Promise.all([loadFolders(), loadReceipts()]);
+    receipts = await loadReceipts();
   } catch (ex) {
     body.innerHTML = '';
     body.append(emptyState('⚠️', 'Could not load receipts. ' + (ex.message || '')));
@@ -56,134 +60,33 @@ export async function renderReceipts(body, root) {
   }
   body.innerHTML = '';
 
-  if (openFolderId != null) renderFolderContents(body, root, folders, receipts);
-  else renderFolderGrid(body, root, folders, receipts);
-}
-
-function renderFolderGrid(body, root, folders, receipts) {
   body.append(el('div', { class: 'row', style: 'gap:8px;margin-bottom:18px' }, [
-    el('button', { class: 'btn btn-primary', style: 'flex:1', onClick: () => newFolderForm(body, root) }, '📁 New folder')
+    el('button', { class: 'btn btn-primary', style: 'flex:1', onClick: () => uploadForm(body, root) }, '📄 Add receipt')
   ]));
 
-  const rows = [];
-  for (const f of folders) {
-    const inFolder = receipts.filter(r => r.folder_id === f.id);
-    const total = inFolder.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    rows.push(folderRow('📁', f.name, inFolder.length, total, () => { openFolderId = f.id; renderReceipts(body, root); }, () => folderActions(f, body, root)));
-  }
-  const unfiled = receipts.filter(r => !r.folder_id);
-  const unfiledTotal = unfiled.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-  rows.push(folderRow('🗂️', 'Unfiled', unfiled.length, unfiledTotal, () => { openFolderId = 'unfiled'; renderReceipts(body, root); }, null));
-
-  const list = el('div', { class: 'list' }, rows);
-  body.append(list);
-  staggerChildren(list);
+  const all = [...BUILTIN_RECEIPTS, ...receipts];
+  const grid = el('div', { class: 'product-grid' }, all.map(r => receiptCard(r, body, root)));
+  body.append(grid);
+  staggerChildren(grid);
 }
 
-function folderRow(icon, name, count, total, onClick, onLongPress) {
-  return el('div', { class: 'card item', onClick }, [
-    el('div', { class: 'thumb' }, icon),
-    el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, name),
-      el('div', { class: 'sub' }, `${count} receipt${count === 1 ? '' : 's'} · ${money(total)}`)
-    ]),
-    onLongPress ? el('button', {
-      class: 'btn btn-sm btn-ghost', onClick: e => { e.stopPropagation(); onLongPress(); }
-    }, '⋯') : el('div', { class: 'home-arrow' }, '›')
-  ]);
-}
+function receiptCard(r, body, root) {
+  const img = r.builtin
+    ? el('img', { class: 'p-img receipt-img', src: r.image, alt: '' })
+    : isImage(r)
+      ? (() => { const im = el('img', { class: 'p-img receipt-img', alt: '' }); signedUrl(r.storage_path).then(url => { if (url) im.src = url; }); return im; })()
+      : el('div', { class: 'p-img receipt-img' }, '📄');
 
-function folderActions(folder, body, root) {
-  actionSheet(folder.name, [
-    { label: '✏️ Rename', onClick: () => renameFolderForm(folder, body, root) },
-    {
-      label: '🗑️ Delete folder', danger: true, onClick: () => confirmModal({
-        title: 'Delete folder?',
-        message: 'Receipts inside move to Unfiled — nothing is deleted.',
-        confirmText: 'Delete',
-        onConfirm: async () => {
-          const { error } = await sb.from('receipt_folders').delete().eq('id', folder.id);
-          if (error) throw error;
-          toast('Folder deleted', 'ok');
-          renderReceipts(body, root);
-        }
-      })
-    }
-  ]);
-}
-
-function newFolderForm(body, root) {
-  formModal({
-    title: 'New folder',
-    fields: [{ name: 'name', label: 'Name', required: true }],
-    submitText: 'Create',
-    onSubmit: async v => {
-      const { error } = await sb.from('receipt_folders').insert({ user_id: getUid(), name: v.name });
-      if (error) throw error;
-      toast('Folder created', 'ok');
-      renderReceipts(body, root);
-    }
-  });
-}
-
-function renameFolderForm(folder, body, root) {
-  formModal({
-    title: 'Rename folder',
-    fields: [{ name: 'name', label: 'Name', value: folder.name, required: true }],
-    submitText: 'Save',
-    onSubmit: async v => {
-      const { error } = await sb.from('receipt_folders').update({ name: v.name }).eq('id', folder.id);
-      if (error) throw error;
-      toast('Renamed', 'ok');
-      renderReceipts(body, root);
-    }
-  });
-}
-
-function renderFolderContents(body, root, folders, receipts) {
-  const folder = openFolderId === 'unfiled' ? null : folders.find(f => f.id === openFolderId);
-  const inFolder = openFolderId === 'unfiled'
-    ? receipts.filter(r => !r.folder_id)
-    : receipts.filter(r => r.folder_id === openFolderId);
-
-  body.append(el('div', {
-    class: 'dim', style: 'font-size:13px;font-weight:600;margin-bottom:12px;cursor:pointer',
-    onClick: () => { openFolderId = null; renderReceipts(body, root); }
-  }, '‹ All folders'));
-
-  body.append(el('div', { class: 'row', style: 'gap:8px;margin-bottom:18px' }, [
-    el('button', {
-      class: 'btn btn-primary', style: 'flex:1',
-      onClick: () => uploadForm(folders, folder, body, root)
-    }, '📄 Add receipt')
-  ]));
-
-  if (!inFolder.length) {
-    body.append(emptyState('🧾', 'No receipts here yet.'));
-    return;
-  }
-
-  const list = el('div', { class: 'list' }, inFolder.map(r => receiptRow(r, body, root)));
-  body.append(list);
-  staggerChildren(list);
-}
-
-function receiptRow(r, body, root) {
-  let thumb;
-  if (isImage(r)) {
-    thumb = el('img', { class: 'thumb', alt: '' });
-    signedUrl(r.storage_path).then(url => { if (url) thumb.src = url; });
-  } else {
-    thumb = el('div', { class: 'thumb' }, '📄');
-  }
   const subParts = [r.merchant, r.receipt_date ? fmtDate(r.receipt_date) : null].filter(Boolean);
-  return el('div', { class: 'card item', onClick: () => detailView(r, body, root) }, [
-    thumb,
-    el('div', { class: 'grow' }, [
-      el('div', { class: 'title' }, r.name),
-      el('div', { class: 'sub' }, subParts.join(' · ') || '—')
-    ]),
-    r.amount != null ? el('div', { class: 'amt' }, money(r.amount)) : null
+  return el('div', {
+    class: 'card product-card', onClick: () => detailView(r, body, root)
+  }, [
+    img,
+    el('div', { class: 'p-body' }, [
+      el('div', { class: 'p-title' }, r.name),
+      el('div', { class: 'p-sub' }, subParts.join(' · ') || '—'),
+      r.amount != null ? el('div', { class: 'p-sub', style: 'font-weight:700' }, money(r.amount)) : null
+    ])
   ]);
 }
 
@@ -193,20 +96,13 @@ async function loadItemOptions() {
   return data || [];
 }
 
-async function uploadForm(folders, folder, body, root) {
+async function uploadForm(body, root) {
   const items = await loadItemOptions();
   const fileInput = el('input', { type: 'file', accept: 'image/*,application/pdf', required: true });
   const nameInput = el('input', { placeholder: 'e.g. Foot Locker — Crocs', style: 'margin-top:0' });
   const merchantInput = el('input', { placeholder: 'Optional', style: 'margin-top:0' });
   const amountInput = el('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Optional', style: 'margin-top:0' });
   const dateInput = el('input', { type: 'date', value: todayISO(), style: 'margin-top:0' });
-  const folderSelect = el('select', {}, [
-    el('option', { value: '' }, 'Unfiled'),
-    ...folders.map(f => el('option', { value: f.id }, f.name))
-  ]);
-  // Setting .value directly (rather than an option's `selected` attribute)
-  // is what reliably drives a <select>'s initial pick.
-  if (folder) folderSelect.value = folder.id;
   const itemSelect = el('select', {}, [
     el('option', { value: '' }, '— None —'),
     ...items.map(i => el('option', { value: i.id }, i.name))
@@ -225,7 +121,6 @@ async function uploadForm(folders, folder, body, root) {
         merchant: merchantInput.value.trim(),
         amount: amountInput.value === '' ? null : Number(amountInput.value),
         receipt_date: dateInput.value || null,
-        folder_id: folderSelect.value || null,
         item_id: itemSelect.value || null
       });
       closeModal();
@@ -244,15 +139,14 @@ async function uploadForm(folders, folder, body, root) {
     el('label', {}, ['Merchant', merchantInput]),
     el('label', {}, ['Amount', amountInput]),
     el('label', {}, ['Date', dateInput]),
-    el('label', {}, ['Folder', folderSelect]),
     el('label', {}, ['Link to inventory item', itemSelect]),
     err,
     saveBtn
   ]));
 }
 
-// Exported so the file can also be uploaded programmatically (e.g. seeding a
-// receipt from outside the form UI) via the same real code path.
+// Exported so the file can also be uploaded programmatically via the same
+// real code path.
 export async function uploadReceipt(file, meta) {
   const uid = getUid();
   const ext = extOf(file.name);
@@ -261,7 +155,6 @@ export async function uploadReceipt(file, meta) {
   if (up.error) throw up.error;
   const { error } = await sb.from('receipts').insert({
     user_id: uid,
-    folder_id: meta.folder_id,
     item_id: meta.item_id,
     name: meta.name,
     merchant: meta.merchant || '',
@@ -275,6 +168,22 @@ export async function uploadReceipt(file, meta) {
 }
 
 async function detailView(r, body, root) {
+  if (r.builtin) {
+    openModal(el('div', {}, [
+      el('h3', {}, r.name),
+      el('img', { src: r.image, alt: '', style: 'width:100%;border-radius:var(--radius-sm);margin-bottom:12px' }),
+      r.merchant ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Merchant: ${r.merchant}`) : null,
+      r.amount != null ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Amount: ${money(r.amount)}`) : null,
+      r.receipt_date ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Date: ${fmtDate(r.receipt_date)}`) : null,
+      el('div', { class: 'modal-actions' }, [
+        el('a', { class: 'btn btn-primary', href: r.image, download: `${r.name}.png` }, '⬇️ Download'),
+        el('a', { class: 'btn btn-ghost', href: r.image, target: '_blank', rel: 'noopener' }, 'Open'),
+        el('button', { class: 'btn btn-ghost', onClick: closeModal }, 'Close')
+      ])
+    ]));
+    return;
+  }
+
   openModal(el('div', {}, [el('h3', {}, r.name), skeleton(1, 'block')]));
   const url = await signedUrl(r.storage_path);
   const downloadUrl = await signedUrl(r.storage_path, `${r.name}.${extOf(r.storage_path)}`);
