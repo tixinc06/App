@@ -18,11 +18,21 @@ import {
 
 const BUCKET = 'receipts';
 
+// Sorted date-descending to match how the flat receipts list already sorts
+// (loadReceipts()'s .order('receipt_date', {ascending:false}) below) — the
+// five JD ones share one receipt number/timestamp (00267-15-167), which
+// only prints a time with no day of month, so they're filed under the
+// first Friday of that month.
 const BUILTIN_RECEIPTS = [
-  { id: 'builtin-nb9060', name: 'New Balance 9060', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 160.04, image: './receipts/new-balance-9060.png' },
-  { id: 'builtin-miller', name: 'Blue Miller Set', merchant: 'JD Sports', receipt_date: '2026-05-17', amount: 70.98, image: './receipts/blue-miller-set.png' },
-  { id: 'builtin-coach', name: 'Coach Bag', merchant: 'Flannels', receipt_date: '2026-04-22', amount: 395.00, image: './receipts/coach-bag.png' },
-  { id: 'builtin-oncloud', name: 'On Cloud X', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 140.04, image: './receipts/on-cloud-x.png' }
+  { id: 'builtin-miller', name: 'Blue Miller Set', merchant: 'JD Sports', receipt_date: '2026-05-17', amount: 70.98, image: './receipts/blue-miller-set.jpg' },
+  { id: 'builtin-coach', name: 'Coach Bag', merchant: 'Flannels', receipt_date: '2026-04-22', amount: 395.00, image: './receipts/coach-bag.jpg' },
+  { id: 'builtin-nb9060-jd', name: 'New Balance 9060', merchant: 'JD Sports', receipt_date: '2026-02-06', amount: 170.00, image: './receipts/new-balance-9060-jd.jpg' },
+  { id: 'builtin-asics-kayano', name: 'Asics Gel-Kayano 14', merchant: 'JD Sports', receipt_date: '2026-02-06', amount: 165.00, image: './receipts/asics-gel-kayano.jpg' },
+  { id: 'builtin-asics-gel', name: 'Asics Gel', merchant: 'JD Sports', receipt_date: '2026-02-06', amount: 155.00, image: './receipts/asics-gel.jpg' },
+  { id: 'builtin-shox', name: 'Nike Shox TL', merchant: 'JD Sports', receipt_date: '2026-02-06', amount: 155.00, image: './receipts/nike-shox.jpg' },
+  { id: 'builtin-p6000', name: 'Nike P-6000', merchant: 'JD Sports', receipt_date: '2026-02-06', amount: 110.00, image: './receipts/nike-p6000.jpg' },
+  { id: 'builtin-nb9060', name: 'New Balance 9060', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 160.04, image: './receipts/new-balance-9060-footlocker.jpg' },
+  { id: 'builtin-oncloud', name: 'On Cloud X', merchant: 'Foot Locker', receipt_date: '2025-08-11', amount: 140.04, image: './receipts/on-cloud-x.jpg' }
 ].map(r => ({ ...r, builtin: true }));
 
 async function loadReceipts() {
@@ -176,7 +186,11 @@ async function detailView(r, body, root) {
       r.amount != null ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Amount: ${money(r.amount)}`) : null,
       r.receipt_date ? el('div', { class: 'dim', style: 'margin-bottom:6px' }, `Date: ${fmtDate(r.receipt_date)}`) : null,
       el('div', { class: 'modal-actions' }, [
-        el('a', { class: 'btn btn-primary', href: r.image, download: `${r.name}.png` }, '⬇️ Download'),
+        // Two built-ins share the name "New Balance 9060" (one Foot Locker,
+        // one JD) — the merchant is folded into the download filename so
+        // saving both doesn't silently overwrite one with the other.
+        // Display elsewhere is untouched, only the saved file is disambiguated.
+        el('a', { class: 'btn btn-primary', href: r.image, download: `${r.name} (${r.merchant}).jpg` }, '⬇️ Download'),
         el('a', { class: 'btn btn-ghost', href: r.image, target: '_blank', rel: 'noopener' }, 'Open'),
         el('button', { class: 'btn btn-ghost', onClick: closeModal }, 'Close')
       ])
